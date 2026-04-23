@@ -156,7 +156,7 @@ class PDFSnipper(QMainWindow):
         if self.file_list.count() == 0: return
         first_file = self.file_list.item(0).data(Qt.UserRole)
         with fitz.open(first_file) as doc:
-            page = doc[5]
+            page = doc[len(doc) // 2]
             pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))  # 表示倍率
             img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
             self.canvas.setPixmap(QPixmap.fromImage(img))
