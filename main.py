@@ -154,10 +154,10 @@ class PDFSnipper(QMainWindow):
 
     def refresh_preview(self):
         if self.file_list.count() == 0: return
-        first_file = self.file_list.item(0).text()
+        first_file = self.file_list.item(0).data(Qt.UserRole)
         with fitz.open(first_file) as doc:
-            page = doc[0]
-            pix = page.get_pixmap(matrix=fitz.Matrix(0.8, 0.8))  # 表示倍率
+            page = doc[5]
+            pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))  # 表示倍率
             img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
             self.canvas.setPixmap(QPixmap.fromImage(img))
 
@@ -191,7 +191,7 @@ class PDFSnipper(QMainWindow):
 
         try:
             for i in range(total_files):
-                file_path = self.file_list.item(i).text()
+                file_path = self.file_list.item(i).data(Qt.UserRole)
                 with fitz.open(file_path) as doc:
                     for page in doc:
                         for q_rect in [self.canvas.rect_p1, self.canvas.rect_p2]:
