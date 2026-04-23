@@ -88,8 +88,8 @@ class PDFSnipper(QMainWindow):
         # 圧縮ラジオボタン
         self.comp_group = QButtonGroup()
         self.radio_none = QRadioButton("元のまま")
-        self.radio_std = QRadioButton("標準圧縮（150dpi）")
-        self.radio_high = QRadioButton("高圧縮（96dpi）")
+        self.radio_std = QRadioButton("標準圧縮（96dpi）")
+        self.radio_high = QRadioButton("高圧縮（48dpi）")
         self.radio_std.setChecked(True)
         self.comp_group.addButton(self.radio_none)
         self.comp_group.addButton(self.radio_std)
@@ -178,7 +178,7 @@ class PDFSnipper(QMainWindow):
         if not save_dir: return
 
         # 圧縮設定の決定
-        dpi = 300 if self.radio_none.isChecked() else (150 if self.radio_std.isChecked() else 96)
+        dpi = 300 if self.radio_none.isChecked() else (96 if self.radio_std.isChecked() else 48)
         zoom = dpi / 72
         
         filename = self.filename_input.text()
