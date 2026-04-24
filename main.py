@@ -167,6 +167,8 @@ class PDFSnipper(QMainWindow):
         self.mode_label.setText(f"現在のモード: {txt}")
 
     def process_pdf(self):
+        self.status_log.setText(f"処理中: 0/{self.file_list.count()}")
+
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "エラー", "ファイルを選択してください")
             return
