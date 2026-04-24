@@ -12,8 +12,7 @@
 ## セットアップ
 
 ### 環境
-* macOS (Intel / Apple Silicon)
-* Python 3.11以上
+- Python 3.11以上
 
 ### 仮想環境の構築とライブラリのインストール
 
@@ -22,10 +21,10 @@
 cd pdf-snipper-for-ndl
 
 # 仮想環境の作成
-python3 -m venv .venv
+python3 -m venv venv
 
 # 仮想環境の有効化
-source .venv/bin/activate
+source venv/bin/activate
 
 # 必要なライブラリのインストール
 pip install -r requirements.txt
