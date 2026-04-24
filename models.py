@@ -10,6 +10,7 @@ EPUB_LTR = "ltr"
 EPUB_RTL = "rtl"
 
 IMAGE_PROCESS_NONE = "none"
+IMAGE_PROCESS_ENHANCE = "enhance"
 
 
 @dataclass(frozen=True)

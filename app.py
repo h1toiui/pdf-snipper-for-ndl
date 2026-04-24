@@ -23,7 +23,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from models import EPUB_LTR, EPUB_RTL, IMAGE_PROCESS_NONE, OUTPUT_EPUB, OUTPUT_PDF, ProcessingOptions
+from models import (
+    EPUB_LTR,
+    EPUB_RTL,
+    IMAGE_PROCESS_ENHANCE,
+    IMAGE_PROCESS_NONE,
+    OUTPUT_EPUB,
+    OUTPUT_PDF,
+    ProcessingOptions,
+)
 from pdf_processor import normalize_output_path, process_documents
 from widgets import SelectionLabel
 
@@ -83,8 +91,13 @@ class PDFSnipper(QMainWindow):
     def _build_output_group(self):
         self.check_color = QRadioButton("元のまま")
         self.check_bw = QRadioButton("グレースケール")
-        self.check_bw.setChecked(True)
-        self.color_group = self._button_group(self.check_color, self.check_bw)
+        self.check_enhance = QRadioButton("白黒二極化")
+        self.check_enhance.setChecked(True)
+        self.color_group = self._button_group(
+            self.check_color,
+            self.check_bw,
+            self.check_enhance,
+        )
 
         self.radio_none = QRadioButton("元のまま")
         self.radio_std = QRadioButton("標準圧縮（96dpi）")
@@ -102,7 +115,7 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_rtl,
         )
 
-        self.filename_input = QLineEdit("吾輩は猫である_combined")
+        self.filename_input = QLineEdit("女ゲリラたち")
         self.filename_input.setPlaceholderText("出力ファイル名を入力")
 
         layout = QVBoxLayout()
@@ -110,6 +123,7 @@ class PDFSnipper(QMainWindow):
             QLabel("カラー:"),
             self.check_color,
             self.check_bw,
+            self.check_enhance,
             QLabel("圧縮レベル:"),
             self.radio_none,
             self.radio_std,
@@ -218,11 +232,16 @@ class PDFSnipper(QMainWindow):
             viewport_width=max(1, self.canvas.width()),
             viewport_height=max(1, self.canvas.height()),
             dpi=self._selected_dpi(),
-            grayscale=self.check_bw.isChecked(),
+            grayscale=self.check_bw.isChecked() or self.check_enhance.isChecked(),
             output_format=output_format,
             epub_direction=EPUB_RTL if self.radio_epub_rtl.isChecked() else EPUB_LTR,
-            image_processing=IMAGE_PROCESS_NONE,
+            image_processing=self._selected_image_processing(),
         )
+
+    def _selected_image_processing(self):
+        if self.check_enhance.isChecked():
+            return IMAGE_PROCESS_ENHANCE
+        return IMAGE_PROCESS_NONE
 
     def _selected_dpi(self):
         if self.radio_none.isChecked():
