@@ -146,7 +146,10 @@ class PDFSnipper(QMainWindow):
         self.btn_run.clicked.connect(self.process_pdf)
 
         self.progress = QProgressBar()
-        self.status_log = QLabel("")
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress.setFormat("0 / 0")
+        self.status_log = QLabel("待機中")
 
         layout = QVBoxLayout()
         layout.addWidget(self.btn_run)
@@ -197,9 +200,11 @@ class PDFSnipper(QMainWindow):
         try:
             options = self._build_processing_options(save_dir)
             result = process_documents(options, self._update_file_progress)
+            self.progress.setValue(self.progress.maximum())
             self.status_log.setText(f"完了: {result.file_size_mb:.2f} MB")
             QMessageBox.information(self, "完了", f"保存完了:\n{result.output_path}")
         except Exception as e:
+            self.status_log.setText("エラー")
             QMessageBox.critical(self, "エラー", f"処理中にエラーが発生しました:\n{e}")
         finally:
             self._set_processing_state(False)
@@ -260,15 +265,17 @@ class PDFSnipper(QMainWindow):
 
     def _update_file_progress(self, processed_files):
         self.progress.setValue(processed_files)
-        self.status_log.setText(f"処理中: {processed_files}/{self.file_list.count()}")
+        self.status_log.setText("処理中")
         QApplication.processEvents()
 
     def _set_processing_state(self, is_processing):
         self.btn_run.setEnabled(not is_processing)
-        self.progress.setMaximum(self.file_list.count())
+        total_files = self.file_list.count()
+        self.progress.setRange(0, max(1, total_files))
+        self.progress.setFormat("%v / %m" if total_files else "0 / 0")
         if is_processing:
             self.progress.setValue(0)
-            self.status_log.setText(f"処理中: 0/{self.file_list.count()}")
+            self.status_log.setText("処理中")
 
     @staticmethod
     def _button_group(*buttons):
