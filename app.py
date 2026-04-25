@@ -79,11 +79,23 @@ class PDFSnipper(QMainWindow):
         return self._group_box("1. インポート（ドラッグで並び替え）", layout)
 
     def _build_crop_group(self):
+        self.radio_scan_spread = QRadioButton("見開き")
+        self.radio_scan_single = QRadioButton("単一ページ")
+        self.radio_scan_spread.setChecked(True)
+        self.scan_type_group = self._button_group(
+            self.radio_scan_spread,
+            self.radio_scan_single,
+        )
+        self.radio_scan_spread.toggled.connect(self.update_scan_type)
+
         self.mode_label = QLabel("現在のモード: 1ページ目（赤）")
         self.btn_toggle_mode = QPushButton("1P / 2P切替")
         self.btn_toggle_mode.clicked.connect(self.toggle_mode)
 
         layout = QVBoxLayout()
+        layout.addWidget(QLabel("スキャンタイプ:"))
+        layout.addWidget(self.radio_scan_spread)
+        layout.addWidget(self.radio_scan_single)
         layout.addWidget(self.mode_label)
         layout.addWidget(self.btn_toggle_mode)
         return self._group_box("2. 切り抜き範囲指定", layout)
@@ -187,6 +199,15 @@ class PDFSnipper(QMainWindow):
         self.canvas.toggle_mode()
         label = "2ページ目（青）" if self.canvas.mode == 2 else "1ページ目（赤）"
         self.mode_label.setText(f"現在のモード: {label}")
+
+    def update_scan_type(self):
+        is_spread = self.radio_scan_spread.isChecked()
+        self.canvas.set_spread_mode(is_spread)
+        self.btn_toggle_mode.setEnabled(is_spread)
+        if is_spread:
+            self.mode_label.setText("現在のモード: 1ページ目（赤）")
+        else:
+            self.mode_label.setText("現在のモード: 単一ページ（赤）")
 
     def process_pdf(self):
         if not self._validate_inputs():
