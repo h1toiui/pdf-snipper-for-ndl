@@ -20,18 +20,11 @@ def enhance_for_ereader(pixmap: fitz.Pixmap) -> fitz.Pixmap:
     # 以降の処理は濃淡だけを見ればよいので、最初にグレースケールへ揃える。
     gray = _pixmap_to_gray_array(pixmap)
 
-    # スキャン由来の紙色・影・周辺減光をならして、背景を白に近づける。
+    # 中央付近の明るい紙面を背景白として推定し、ページ全体の明るさを揃える。
     normalized = _flatten_background(gray)
 
-    # 薄い文字やインクのかすれを拾いやすくするため、局所コントラストを上げる。
-    contrasted = _boost_local_contrast(normalized)
-
-    # 最後に白黒へ二極化する。出力サイズも小さくなりやすい。
-    binary = _binarize(contrasted)
-
-    # 薄い複製防止透かしは局所コントラスト補正で黒く拾われやすい。
-    # 濃い本文と、それに接する薄い縁だけを残し、独立した灰色の点描は白へ戻す。
-    binary = _remove_pale_marks(binary, gray)
+    # 白黒へ二極化する。出力サイズも小さくなりやすい。
+    binary = _binarize(normalized)
     return _gray_array_to_pixmap(binary)
 
 
@@ -54,16 +47,17 @@ def _pixmap_to_gray_array(pixmap: fitz.Pixmap):
 
 
 def _flatten_background(gray):
-    """ぼかした画像を背景推定として使い、紙色や影を均一化する。"""
-    kernel_size = _odd_kernel_size(gray.shape, ratio=0.03, minimum=31)
-    background = cv2.GaussianBlur(gray, (kernel_size, kernel_size), 0)
-    return cv2.divide(gray, background, scale=255)
+    """中央付近の明るい画素を背景白として推定し、紙色を白へ寄せる。"""
+    height, width = gray.shape[:2]
+    y_margin = height // 5
+    x_margin = width // 5
+    center = gray[y_margin : height - y_margin, x_margin : width - x_margin]
+    if center.size == 0:
+        center = gray
 
-
-def _boost_local_contrast(gray):
-    """CLAHEでページ内の場所ごとの薄さの差を補正する。"""
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    return clahe.apply(gray)
+    background_level = max(1.0, float(np.percentile(center, 95)))
+    normalized = gray.astype(np.float32) * (255.0 / background_level)
+    return np.clip(normalized, 0, 255).astype(np.uint8)
 
 
 def _binarize(gray):
@@ -77,24 +71,6 @@ def _binarize(gray):
         block_size,
         11,
     )
-
-
-def _remove_pale_marks(binary, original_gray):
-    """薄い透かしを落としつつ、本文の淡い縁は残す。"""
-    strong_ink = original_gray < 172
-    weak_ink = original_gray < 220
-    black_candidate = (binary == 0) & weak_ink
-
-    # 文字は薄い画素だけで構成される部分があっても、同じ連結成分のどこかに
-    # 濃い芯が出やすい。透かしの点描は濃い芯を含まない小片になりやすい。
-    component_count, labels = cv2.connectedComponents(black_candidate.astype(np.uint8), connectivity=8)
-    keep_labels = np.zeros(component_count, dtype=bool)
-    keep_labels[np.unique(labels[strong_ink & black_candidate])] = True
-    keep_mask = keep_labels[labels] & black_candidate
-
-    result = np.full(binary.shape, 255, dtype=np.uint8)
-    result[keep_mask] = 0
-    return result
 
 
 def _gray_array_to_pixmap(gray):
