@@ -128,11 +128,7 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_ltr,
             self.radio_epub_rtl,
         )
-        self.radio_pdf.toggled.connect(self.update_ocr_option)
-        self.radio_epub_ltr.toggled.connect(self.update_ocr_option)
-        self.radio_epub_rtl.toggled.connect(self.update_ocr_option)
-
-        self.check_ocr = QCheckBox("OCRテキストをEPUBに埋め込む")
+        self.check_ocr = QCheckBox("OCRテキストを埋め込む")
 
         self.filename_input = QLineEdit("女ゲリラたち")
         self.filename_input.setPlaceholderText("出力ファイル名を入力")
@@ -157,7 +153,6 @@ class PDFSnipper(QMainWindow):
         ):
             layout.addWidget(widget)
 
-        self.update_ocr_option()
         return self._group_box("3. 出力オプション", layout)
 
     def _build_execution_group(self):
@@ -218,12 +213,6 @@ class PDFSnipper(QMainWindow):
         else:
             self.mode_label.setText("現在のモード: 単一ページ（赤）")
 
-    def update_ocr_option(self):
-        is_epub = self.radio_epub_ltr.isChecked() or self.radio_epub_rtl.isChecked()
-        self.check_ocr.setEnabled(is_epub)
-        if not is_epub:
-            self.check_ocr.setChecked(False)
-
     def process_pdf(self):
         if not self._validate_inputs():
             return
@@ -239,7 +228,7 @@ class PDFSnipper(QMainWindow):
             self.progress.setValue(self.progress.maximum())
             message = f"保存完了:\n{result.output_path}"
             if result.ocr_embedded:
-                message += "\n\nOCRテキストをEPUBに埋め込みました"
+                message += "\n\nOCRテキストを埋め込みました"
             self.status_log.setText(f"完了: {result.file_size_mb:.2f} MB")
             QMessageBox.information(self, "完了", message)
         except Exception as e:
@@ -280,7 +269,7 @@ class PDFSnipper(QMainWindow):
             output_format=output_format,
             epub_direction=EPUB_RTL if self.radio_epub_rtl.isChecked() else EPUB_LTR,
             image_processing=self._selected_image_processing(),
-            ocr_text_output=output_format == OUTPUT_EPUB and self.check_ocr.isChecked(),
+            ocr_text_output=self.check_ocr.isChecked(),
             ocr_command=self._ocr_command(),
         )
 
@@ -304,7 +293,8 @@ class PDFSnipper(QMainWindow):
         if env_command:
             return env_command
 
-        local_command = os.path.join(os.getcwd(), ".venv-ndlocr", "bin", "ndlocr-lite")
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        local_command = os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite")
         if os.path.exists(local_command):
             return local_command
 

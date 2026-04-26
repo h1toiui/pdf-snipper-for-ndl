@@ -6,12 +6,12 @@ from html import escape
 import fitz
 
 
-def save_as_epub(path, images, title, direction, ocr_texts=None):
+def save_as_epub(path, images, title, direction, ocr_pages=None):
     """画像リストをEPUB 3.0形式で保存する"""
     pub_id = str(uuid.uuid4())
     mod_time = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
     safe_title = escape(title)
-    ocr_texts = ocr_texts or []
+    ocr_pages = ocr_pages or []
 
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(
@@ -40,8 +40,8 @@ def save_as_epub(path, images, title, direction, ocr_texts=None):
             html_name = f"page_{i:04d}.xhtml"
             zf.writestr(f"OEBPS/Images/{img_name}", img_data)
 
-            ocr_text = ocr_texts[i] if i < len(ocr_texts) else ""
-            html_content = _page_xhtml(i, img_name, width, height, ocr_text)
+            ocr_page = ocr_pages[i] if i < len(ocr_pages) else None
+            html_content = _page_xhtml(i, img_name, width, height, ocr_page)
             zf.writestr(f"OEBPS/Text/{html_name}", html_content)
 
             manifest_items.append(
@@ -101,8 +101,8 @@ def _image_size(image_data):
     return pixmap.width, pixmap.height
 
 
-def _page_xhtml(index, img_name, width, height, ocr_text=""):
-    safe_ocr_text = escape(ocr_text)
+def _page_xhtml(index, img_name, width, height, ocr_page=None):
+    ocr_layer = _ocr_layer_xhtml(ocr_page, width, height)
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -118,18 +118,35 @@ def _page_xhtml(index, img_name, width, height, ocr_text=""):
       background: #fff;
       overflow: hidden;
     }}
+    body {{
+      position: relative;
+    }}
     svg {{
       display: block;
       width: 100%;
       height: 100%;
     }}
-    .ocr-text {{
+    .ocr-layer {{
       position: absolute;
-      width: 1px;
-      height: 1px;
+      left: 0;
+      top: 0;
+      width: {width}px;
+      height: {height}px;
+      color: transparent;
+      pointer-events: none;
+      user-select: text;
+    }}
+    .ocr-line {{
+      position: absolute;
+      display: block;
       overflow: hidden;
-      clip: rect(0 0 0 0);
-      white-space: pre-wrap;
+      white-space: nowrap;
+      color: transparent;
+      line-height: 1;
+    }}
+    .ocr-line.vertical {{
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
     }}
   </style>
 </head>
@@ -143,9 +160,40 @@ def _page_xhtml(index, img_name, width, height, ocr_text=""):
        preserveAspectRatio="xMidYMid meet">
     <image width="{width}" height="{height}" href="../Images/{img_name}" xlink:href="../Images/{img_name}"/>
   </svg>
-  <div class="ocr-text">{safe_ocr_text}</div>
+  {ocr_layer}
 </body>
 </html>'''
+
+
+def _ocr_layer_xhtml(ocr_page, width, height):
+    if ocr_page is None:
+        return ""
+    if not ocr_page.lines:
+        if not ocr_page.text:
+            return ""
+        return (
+            '<div class="ocr-layer">'
+            f'<span class="ocr-line" style="left:0; top:0; width:1px; height:1px; font-size:1px;">'
+            f'{escape(ocr_page.text)}</span></div>'
+        )
+
+    scale_x = width / max(1, ocr_page.image_width)
+    scale_y = height / max(1, ocr_page.image_height)
+    spans = []
+    for line in ocr_page.lines:
+        x = line.x0 * scale_x
+        y = line.y0 * scale_y
+        w = max(1, (line.x1 - line.x0) * scale_x)
+        h = max(1, (line.y1 - line.y0) * scale_y)
+        font_size = max(1, min(w, h) * 0.9)
+        class_name = "ocr-line vertical" if line.is_vertical else "ocr-line"
+        spans.append(
+            f'<span class="{class_name}" style="left:{x:.2f}px; top:{y:.2f}px; '
+            f'width:{w:.2f}px; height:{h:.2f}px; font-size:{font_size:.2f}px;">'
+            f'{escape(line.text)}</span>'
+        )
+
+    return f'<div class="ocr-layer">{"".join(spans)}</div>'
 
 
 def _nav_xhtml(title):

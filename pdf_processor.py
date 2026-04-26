@@ -28,14 +28,13 @@ def process_documents(
     zoom = options.dpi / 72
     image_list = []
     page_count = 0
-    ocr_output_path = None
-    ocr_texts = []
-    should_embed_ocr = options.ocr_text_output and not is_pdf
+    ocr_pages = []
+    should_run_ocr = options.ocr_text_output
 
     with fitz.open() as new_doc, tempfile.TemporaryDirectory() as temp_dir:
         ocr_image_dir = os.path.join(temp_dir, "ocr-images")
         ocr_result_dir = os.path.join(temp_dir, "ocr-results")
-        if should_embed_ocr:
+        if should_run_ocr:
             os.makedirs(ocr_image_dir, exist_ok=True)
             os.makedirs(ocr_result_dir, exist_ok=True)
 
@@ -53,7 +52,7 @@ def process_documents(
                             options.viewport_width,
                             options.viewport_height,
                         )
-                        if should_embed_ocr:
+                        if should_run_ocr:
                             ocr_pix = page.get_pixmap(
                                 matrix=fitz.Matrix(OCR_DPI / 72, OCR_DPI / 72),
                                 clip=pdf_rect,
@@ -88,10 +87,10 @@ def process_documents(
             if on_progress is not None:
                 on_progress("render", file_index + 1, len(options.file_paths))
 
-        if should_embed_ocr:
+        if should_run_ocr:
             if on_progress is not None:
                 on_progress("ocr", 0, 1)
-            ocr_texts = run_ndlocr_lite(
+            ocr_pages = run_ndlocr_lite(
                 ocr_image_dir,
                 ocr_result_dir,
                 options.ocr_command,
@@ -100,6 +99,8 @@ def process_documents(
                 on_progress("ocr", 1, 1)
 
         if is_pdf:
+            if should_run_ocr:
+                _embed_ocr_in_pdf(new_doc, ocr_pages)
             new_doc.save(options.output_path, garbage=3, deflate=True)
         else:
             save_as_epub(
@@ -107,15 +108,14 @@ def process_documents(
                 image_list,
                 options.output_title,
                 options.epub_direction,
-                ocr_texts=ocr_texts,
+                ocr_pages=ocr_pages,
             )
 
         return ProcessingResult(
             output_path=options.output_path,
             page_count=page_count,
             file_size_mb=os.path.getsize(options.output_path) / (1024 * 1024),
-            ocr_output_path=ocr_output_path,
-            ocr_embedded=should_embed_ocr,
+            ocr_embedded=should_run_ocr,
         )
 
 
@@ -128,3 +128,42 @@ def _qt_rect_to_pdf_rect(q_rect, page_width, page_height, viewport_width, viewpo
         q_rect.right() * scale_x,
         q_rect.bottom() * scale_y,
     )
+
+
+def _embed_ocr_in_pdf(doc, ocr_pages):
+    for page_index, ocr_page in enumerate(ocr_pages[: doc.page_count]):
+        page = doc[page_index]
+        if not ocr_page.lines:
+            continue
+
+        scale_x = page.rect.width / max(1, ocr_page.image_width)
+        scale_y = page.rect.height / max(1, ocr_page.image_height)
+        for line in ocr_page.lines:
+            rect = fitz.Rect(
+                line.x0 * scale_x,
+                line.y0 * scale_y,
+                line.x1 * scale_x,
+                line.y1 * scale_y,
+            )
+            _insert_invisible_textbox(page, rect, line.text, line.is_vertical)
+
+
+def _insert_invisible_textbox(page, rect, text, is_vertical):
+    if rect.is_empty or not text.strip():
+        return
+
+    base_size = rect.width if is_vertical else rect.height
+    rotate = 90 if is_vertical else 0
+    for ratio in (0.85, 0.7, 0.55, 0.4):
+        fontsize = max(3, base_size * ratio)
+        remaining = page.insert_textbox(
+            rect,
+            text,
+            fontname="japan",
+            fontsize=fontsize,
+            render_mode=3,
+            rotate=rotate,
+            overlay=True,
+        )
+        if remaining >= 0:
+            return

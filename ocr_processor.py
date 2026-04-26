@@ -3,18 +3,37 @@ import os
 import shlex
 import subprocess
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 
 
 TEXT_KEYS = {"text", "content", "contents", "string", "value"}
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2", ".bmp"}
+
+
+@dataclass(frozen=True)
+class OCRLine:
+    text: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    is_vertical: bool
+    confidence: float | None = None
+
+
+@dataclass(frozen=True)
+class OCRPage:
+    lines: list[OCRLine]
+    image_width: float
+    image_height: float
+    text: str
 
 
 def run_ndlocr_lite(image_dir, output_dir, command="ndlocr-lite"):
-    """Run NDLOCR-Lite for a directory of cropped page images and return page texts."""
+    """Run NDLOCR-Lite for a directory of cropped page images and return pages."""
     args = _build_command(command, image_dir, output_dir)
     try:
-        completed = subprocess.run(
+        subprocess.run(
             args,
             check=True,
             capture_output=True,
@@ -47,29 +66,6 @@ def _build_command(command, image_dir, output_dir):
     ]
 
 
-def _collect_ocr_text(output_dir):
-    output_path = Path(output_dir)
-    text_files = sorted(output_path.rglob("*.txt"))
-    if text_files:
-        return "\n\n".join(path.read_text(encoding="utf-8", errors="replace") for path in text_files)
-
-    chunks = []
-    for path in sorted(output_path.rglob("*")):
-        if path.suffix.lower() in IMAGE_SUFFIXES:
-            continue
-        if path.suffix.lower() == ".json":
-            text = _text_from_json(path)
-        elif path.suffix.lower() == ".xml":
-            text = _text_from_xml(path)
-        else:
-            continue
-
-        if text:
-            chunks.append(f"--- {path.stem} ---\n{text}")
-
-    return "\n\n".join(chunks)
-
-
 def _collect_ocr_pages(output_dir):
     output_path = Path(output_dir)
     page_paths = sorted(
@@ -77,27 +73,132 @@ def _collect_ocr_pages(output_dir):
         for path in output_path.rglob("*")
         if path.suffix.lower() in {".json", ".xml", ".txt"}
     )
-    return [_text_from_result_file(path) for path in page_paths]
+    return [_page_from_result_file(path) for path in page_paths]
 
 
-def _text_from_result_file(path):
+def _page_from_result_file(path):
     suffix = path.suffix.lower()
     if suffix == ".json":
-        return _text_from_json(path)
+        return _page_from_json(path)
     if suffix == ".xml":
-        return _text_from_xml(path)
-    if suffix == ".txt":
-        return path.read_text(encoding="utf-8", errors="replace").strip()
-    return ""
+        text = _text_from_xml(path)
+    elif suffix == ".txt":
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    else:
+        text = ""
+    return OCRPage(lines=[], image_width=0, image_height=0, text=text)
 
 
-def _text_from_json(path):
-    data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+def _fallback_text_from_json_data(data):
     values = []
     _collect_json_strings(data, values)
     if not values:
         _collect_all_json_strings(data, values)
     return "\n".join(values)
+
+
+def _page_from_json(path):
+    data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    page = _page_from_ndlocr_json(data)
+    if page.text or page.lines:
+        return page
+    return OCRPage(lines=[], image_width=0, image_height=0, text=_fallback_text_from_json_data(data))
+
+
+def _page_from_ndlocr_json(data):
+    contents = data.get("contents") if isinstance(data, dict) else None
+    if not isinstance(contents, list):
+        return OCRPage(lines=[], image_width=0, image_height=0, text="")
+
+    imginfo = data.get("imginfo") if isinstance(data.get("imginfo"), dict) else {}
+    image_width = float(imginfo.get("img_width") or 0)
+    image_height = float(imginfo.get("img_height") or 0)
+
+    paragraphs = []
+    ocr_lines = []
+    for block in contents:
+        block_lines = _ocr_lines_from_block(block)
+        ocr_lines.extend(block_lines)
+        paragraph = _join_ocr_lines([line.text for line in block_lines])
+        if paragraph:
+            paragraphs.append(paragraph)
+
+    return OCRPage(
+        lines=ocr_lines,
+        image_width=image_width,
+        image_height=image_height,
+        text="\n\n".join(paragraphs),
+    )
+
+
+def _ocr_lines_from_block(block):
+    lines = []
+    if isinstance(block, dict):
+        line = _ocr_line_from_dict(block)
+        if line is not None:
+            lines.append(line)
+        for value in block.values():
+            lines.extend(_ocr_lines_from_block(value))
+    elif isinstance(block, list):
+        for item in block:
+            lines.extend(_ocr_lines_from_block(item))
+    return lines
+
+
+def _ocr_line_from_dict(data):
+    text = data.get("text")
+    bbox = data.get("boundingBox")
+    if not isinstance(text, str) or not text.strip() or not _is_bbox(bbox):
+        return None
+
+    xs = [float(point[0]) for point in bbox]
+    ys = [float(point[1]) for point in bbox]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    is_vertical = (y1 - y0) > (x1 - x0)
+    confidence = data.get("confidence")
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError):
+        confidence = None
+
+    return OCRLine(
+        text=text.strip(),
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        is_vertical=is_vertical,
+        confidence=confidence,
+    )
+
+
+def _is_bbox(value):
+    return (
+        isinstance(value, list)
+        and len(value) >= 4
+        and all(isinstance(point, list) and len(point) >= 2 for point in value[:4])
+    )
+
+
+def _join_ocr_lines(lines):
+    joined = ""
+    for line in lines:
+        line = _normalize_ocr_line(line)
+        if not line:
+            continue
+        if joined and _needs_space_between(joined[-1], line[0]):
+            joined += " "
+        joined += line
+    return joined
+
+
+def _normalize_ocr_line(line):
+    return " ".join(line.strip().split())
+
+
+def _needs_space_between(left, right):
+    return left.isascii() and right.isascii() and left.isalnum() and right.isalnum()
 
 
 def _collect_json_strings(value, values):

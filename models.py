@@ -35,5 +35,4 @@ class ProcessingResult:
     output_path: str
     page_count: int
     file_size_mb: float
-    ocr_output_path: str | None = None
     ocr_embedded: bool = False
