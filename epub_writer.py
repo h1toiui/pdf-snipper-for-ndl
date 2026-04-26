@@ -6,11 +6,12 @@ from html import escape
 import fitz
 
 
-def save_as_epub(path, images, title, direction):
+def save_as_epub(path, images, title, direction, ocr_texts=None):
     """画像リストをEPUB 3.0形式で保存する"""
     pub_id = str(uuid.uuid4())
     mod_time = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
     safe_title = escape(title)
+    ocr_texts = ocr_texts or []
 
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(
@@ -39,7 +40,8 @@ def save_as_epub(path, images, title, direction):
             html_name = f"page_{i:04d}.xhtml"
             zf.writestr(f"OEBPS/Images/{img_name}", img_data)
 
-            html_content = _page_xhtml(i, img_name, width, height)
+            ocr_text = ocr_texts[i] if i < len(ocr_texts) else ""
+            html_content = _page_xhtml(i, img_name, width, height, ocr_text)
             zf.writestr(f"OEBPS/Text/{html_name}", html_content)
 
             manifest_items.append(
@@ -99,7 +101,8 @@ def _image_size(image_data):
     return pixmap.width, pixmap.height
 
 
-def _page_xhtml(index, img_name, width, height):
+def _page_xhtml(index, img_name, width, height, ocr_text=""):
+    safe_ocr_text = escape(ocr_text)
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -120,6 +123,14 @@ def _page_xhtml(index, img_name, width, height):
       width: 100%;
       height: 100%;
     }}
+    .ocr-text {{
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: pre-wrap;
+    }}
   </style>
 </head>
 <body>
@@ -132,6 +143,7 @@ def _page_xhtml(index, img_name, width, height):
        preserveAspectRatio="xMidYMid meet">
     <image width="{width}" height="{height}" href="../Images/{img_name}" xlink:href="../Images/{img_name}"/>
   </svg>
+  <div class="ocr-text">{safe_ocr_text}</div>
 </body>
 </html>'''
 

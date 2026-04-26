@@ -26,6 +26,8 @@ class ProcessingOptions:
     output_format: str
     epub_direction: str
     image_processing: str = IMAGE_PROCESS_NONE
+    ocr_text_output: bool = False
+    ocr_command: str = "ndlocr-lite"
 
 
 @dataclass(frozen=True)
@@ -33,3 +35,5 @@ class ProcessingResult:
     output_path: str
     page_count: int
     file_size_mb: float
+    ocr_output_path: str | None = None
+    ocr_embedded: bool = False
