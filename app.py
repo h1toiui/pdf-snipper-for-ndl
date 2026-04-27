@@ -180,7 +180,18 @@ class PDFSnipper(QMainWindow):
         """実行ボタン、進捗バー、状態メッセージのUIグループを作る。"""
         self.btn_run = QPushButton("実行")
         self.btn_run.setFixedHeight(50)
-        self.btn_run.setStyleSheet("background-color: #007AFF; color: white; font-weight: bold;")
+        self.btn_run.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #007AFF;
+                color: white;
+            }
+            QPushButton:disabled {
+                background-color: #b8b8b8;
+                color: #f2f2f2;
+            }
+            """
+        )
         self.btn_run.clicked.connect(self.process_pdf)
 
         self.progress = QProgressBar()
@@ -392,6 +403,8 @@ class PDFSnipper(QMainWindow):
         else:
             self._set_progress_value(current, total)
             self.status_log.setText(f"処理中: {current} / {total}")
+        self.progress.repaint()
+        self.status_log.repaint()
         QApplication.processEvents()
 
     def _set_processing_state(self, is_processing):

@@ -94,8 +94,6 @@ class SelectionLabel(QLabel):
         """見開きモードの有効/無効を切り替える。"""
         self.spread_mode = enabled
         self.mode = 1
-        if not enabled:
-            self.rect_p2 = QRect()
         self.update()
 
     def toggle_mode(self):
