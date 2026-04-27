@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -56,11 +57,19 @@ class PDFSnipper(QMainWindow):
         side_layout.addWidget(self._build_output_group())
         side_layout.addWidget(self._build_execution_group())
 
+        side_widget = QWidget()
+        side_widget.setLayout(side_layout)
+
+        side_scroll = QScrollArea()
+        side_scroll.setWidgetResizable(True)
+        side_scroll.setWidget(side_widget)
+        side_scroll.setMinimumWidth(320)
+
         self.canvas = SelectionLabel()
         self.canvas.setStyleSheet("border: 2px solid #ccc; background-color: #eee;")
 
         main_layout = QHBoxLayout()
-        main_layout.addLayout(side_layout, 1)
+        main_layout.addWidget(side_scroll, 1)
         main_layout.addWidget(self.canvas, 3)
 
         container = QWidget()
@@ -264,7 +273,7 @@ class PDFSnipper(QMainWindow):
         if not self.canvas.selected_rects():
             QMessageBox.warning(self, "エラー", "範囲を指定してください")
             return False
-        if self.canvas.pixmap() is None:
+        if self.canvas.pixmap().isNull():
             QMessageBox.warning(self, "エラー", "プレビュー画像を読み込めませんでした")
             return False
         return True
@@ -284,8 +293,8 @@ class PDFSnipper(QMainWindow):
             output_title=output_title,
             output_author=self.author_input.text().strip(),
             crop_rects=self.canvas.selected_rects(),
-            viewport_width=max(1, self.canvas.width()),
-            viewport_height=max(1, self.canvas.height()),
+            viewport_width=self.canvas.image_width(),
+            viewport_height=self.canvas.image_height(),
             dpi=self._selected_dpi(),
             grayscale=self.check_bw.isChecked() or self.check_enhance.isChecked(),
             output_format=output_format,
