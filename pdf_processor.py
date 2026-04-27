@@ -9,6 +9,7 @@ from models import OUTPUT_PDF, ProcessingOptions, ProcessingResult
 from ocr_processor import run_ndlocr_lite
 from epub_writer import save_as_epub
 
+OCR_DPI = 200
 INVALID_FILENAME_CHARS = '<>:"/\\|?*'
 
 
@@ -57,6 +58,19 @@ def process_documents(
                             options.viewport_width,
                             options.viewport_height,
                         )
+                        if should_run_ocr:
+                            ocr_pix = page.get_pixmap(
+                                matrix=fitz.Matrix(OCR_DPI / 72, OCR_DPI / 72),
+                                clip=pdf_rect,
+                                colorspace=fitz.csRGB,
+                            )
+                            ocr_pix.save(
+                                os.path.join(
+                                    ocr_image_dir,
+                                    f"page_{page_count + 1:05d}.png",
+                                )
+                            )
+
                         colorspace = fitz.csGRAY if options.grayscale else fitz.csRGB
                         pix = page.get_pixmap(
                             matrix=fitz.Matrix(zoom, zoom),
@@ -64,14 +78,6 @@ def process_documents(
                             colorspace=colorspace,
                         )
                         pix = apply_image_processing(pix, options.image_processing)
-
-                        if should_run_ocr:
-                            pix.save(
-                                os.path.join(
-                                    ocr_image_dir,
-                                    f"page_{page_count + 1:05d}.png",
-                                )
-                            )
 
                         if is_pdf:
                             img_page = new_doc.new_page(

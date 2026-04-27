@@ -144,7 +144,7 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_ltr,
             self.radio_epub_rtl,
         )
-        self.check_ocr = QCheckBox("OCRテキストを埋め込む")
+        self.check_ocr = QCheckBox("OCR（処理に時間がかかります）")
 
         self.filename_input = QLineEdit()
         self.filename_input.textEdited.connect(lambda: setattr(self, "_title_was_edited", True))
