@@ -6,6 +6,7 @@ from app import PDFSnipper
 
 
 def main():
+    """Qtアプリケーションを起動してメイン画面を表示する。"""
     app = QApplication(sys.argv)
     window = PDFSnipper()
     window.show()

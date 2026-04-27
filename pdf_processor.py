@@ -13,6 +13,7 @@ OCR_DPI = 200
 
 
 def normalize_output_path(save_dir, filename, output_format):
+    """保存先、入力名、出力形式から最終的な出力パスとタイトルを作る。"""
     filename = filename.strip() or "output"
     ext = ".pdf" if output_format == OUTPUT_PDF else ".epub"
     if not filename.endswith(ext):
@@ -24,12 +25,18 @@ def process_documents(
     options: ProcessingOptions,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> ProcessingResult:
+    """指定されたPDF群を切り抜き、PDFまたはEPUBとして保存する。"""
     is_pdf = options.output_format == OUTPUT_PDF
     zoom = options.dpi / 72
     image_list = []
     page_count = 0
     ocr_pages = []
     should_run_ocr = options.ocr_text_output
+    crop_rects = [rect for rect in options.crop_rects if not rect.isNull()]
+    total_pages = _count_output_pages(options.file_paths, len(crop_rects))
+
+    if on_progress is not None:
+        on_progress("prepare", 0, total_pages)
 
     with fitz.open() as new_doc, tempfile.TemporaryDirectory() as temp_dir:
         ocr_image_dir = os.path.join(temp_dir, "ocr-images")
@@ -38,13 +45,10 @@ def process_documents(
             os.makedirs(ocr_image_dir, exist_ok=True)
             os.makedirs(ocr_result_dir, exist_ok=True)
 
-        for file_index, file_path in enumerate(options.file_paths):
+        for file_path in options.file_paths:
             with fitz.open(file_path) as doc:
                 for page in doc:
-                    for q_rect in options.crop_rects:
-                        if q_rect.isNull():
-                            continue
-
+                    for q_rect in crop_rects:
                         pdf_rect = _qt_rect_to_pdf_rect(
                             q_rect,
                             page.rect.width,
@@ -83,26 +87,31 @@ def process_documents(
                             image_list.append(pix.tobytes("png"))
 
                         page_count += 1
-
-            if on_progress is not None:
-                on_progress("render", file_index + 1, len(options.file_paths))
+                        if on_progress is not None:
+                            on_progress("render", page_count, total_pages)
 
         if should_run_ocr:
             if on_progress is not None:
-                on_progress("ocr", 0, 1)
+                on_progress("ocr", 0, 0)
             ocr_pages = run_ndlocr_lite(
                 ocr_image_dir,
                 ocr_result_dir,
                 options.ocr_command,
             )
             if on_progress is not None:
-                on_progress("ocr", 1, 1)
+                on_progress("ocr_done", total_pages, total_pages)
 
         if is_pdf:
             if should_run_ocr:
+                if on_progress is not None:
+                    on_progress("embed", total_pages, total_pages)
                 _embed_ocr_in_pdf(new_doc, ocr_pages)
+            if on_progress is not None:
+                on_progress("save", total_pages, total_pages)
             new_doc.save(options.output_path, garbage=3, deflate=True)
         else:
+            if on_progress is not None:
+                on_progress("save", total_pages, total_pages)
             save_as_epub(
                 options.output_path,
                 image_list,
@@ -119,7 +128,20 @@ def process_documents(
         )
 
 
+def _count_output_pages(file_paths, crop_count):
+    """入力PDFのページ数と切り抜き矩形数から出力ページ数を見積もる。"""
+    if crop_count <= 0:
+        return 0
+
+    page_count = 0
+    for file_path in file_paths:
+        with fitz.open(file_path) as doc:
+            page_count += doc.page_count * crop_count
+    return page_count
+
+
 def _qt_rect_to_pdf_rect(q_rect, page_width, page_height, viewport_width, viewport_height):
+    """プレビュー上のQt矩形をPDFページ座標の矩形へ変換する。"""
     scale_x = page_width / viewport_width
     scale_y = page_height / viewport_height
     return fitz.Rect(
@@ -131,6 +153,7 @@ def _qt_rect_to_pdf_rect(q_rect, page_width, page_height, viewport_width, viewpo
 
 
 def _embed_ocr_in_pdf(doc, ocr_pages):
+    """OCR結果をPDF各ページの透明テキストレイヤーとして埋め込む。"""
     for page_index, ocr_page in enumerate(ocr_pages[: doc.page_count]):
         page = doc[page_index]
         if not ocr_page.lines:
@@ -149,6 +172,7 @@ def _embed_ocr_in_pdf(doc, ocr_pages):
 
 
 def _insert_invisible_textbox(page, rect, text, is_vertical):
+    """指定範囲へ検索可能だが見えないテキストを挿入する。"""
     if rect.is_empty or not text.strip():
         return
 

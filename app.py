@@ -40,12 +40,14 @@ from widgets import SelectionLabel
 
 class PDFSnipper(QMainWindow):
     def __init__(self):
+        """メインウィンドウを初期化してUIを構築する。"""
         super().__init__()
         self.setWindowTitle("pdf-snipper for ndl")
         self.resize(1100, 850)
         self._build_ui()
 
     def _build_ui(self):
+        """左側の操作パネルと右側のプレビュー領域を組み立てる。"""
         side_layout = QVBoxLayout()
         side_layout.addWidget(self._build_file_group())
         side_layout.addWidget(self._build_crop_group())
@@ -64,6 +66,7 @@ class PDFSnipper(QMainWindow):
         self.setCentralWidget(container)
 
     def _build_file_group(self):
+        """PDF追加、解除、並び替え用のUIグループを作る。"""
         self.btn_select = QPushButton("PDFファイルを追加")
         self.btn_select.clicked.connect(self.select_files)
 
@@ -81,6 +84,7 @@ class PDFSnipper(QMainWindow):
         return self._group_box("1. インポート（ドラッグで並び替え）", layout)
 
     def _build_crop_group(self):
+        """スキャン種別と切り抜き範囲指定用のUIグループを作る。"""
         self.radio_scan_spread = QRadioButton("見開き")
         self.radio_scan_single = QRadioButton("単一ページ")
         self.radio_scan_spread.setChecked(True)
@@ -103,6 +107,7 @@ class PDFSnipper(QMainWindow):
         return self._group_box("2. 切り抜き範囲指定", layout)
 
     def _build_output_group(self):
+        """色、圧縮、形式、OCR、ファイル名の出力オプションを作る。"""
         self.check_color = QRadioButton("元のまま")
         self.check_bw = QRadioButton("グレースケール")
         self.check_enhance = QRadioButton("白黒二極化")
@@ -156,15 +161,14 @@ class PDFSnipper(QMainWindow):
         return self._group_box("3. 出力オプション", layout)
 
     def _build_execution_group(self):
+        """実行ボタン、進捗バー、状態メッセージのUIグループを作る。"""
         self.btn_run = QPushButton("実行")
         self.btn_run.setFixedHeight(50)
         self.btn_run.setStyleSheet("background-color: #007AFF; color: white; font-weight: bold;")
         self.btn_run.clicked.connect(self.process_pdf)
 
         self.progress = QProgressBar()
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
-        self.progress.setFormat("0 / 0")
+        self._reset_progress()
         self.status_log = QLabel("待機中")
 
         layout = QVBoxLayout()
@@ -174,6 +178,7 @@ class PDFSnipper(QMainWindow):
         return self._group_box("4. 実行", layout)
 
     def select_files(self):
+        """ファイルダイアログで選ばれたPDFを一覧へ追加する。"""
         files, _ = QFileDialog.getOpenFileNames(self, "PDFを選択", "", "PDF Files (*.pdf)")
         for file_path in sorted(files):
             self._add_file(file_path)
@@ -182,11 +187,13 @@ class PDFSnipper(QMainWindow):
             self.refresh_preview()
 
     def remove_selected_files(self):
+        """一覧で選択中のPDFを処理対象から外す。"""
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
         self.refresh_preview()
 
     def refresh_preview(self):
+        """先頭PDFの中間ページを読み込み、切り抜き用プレビューへ表示する。"""
         if self.file_list.count() == 0:
             self.canvas.clear()
             self.canvas.clear_selection()
@@ -200,11 +207,13 @@ class PDFSnipper(QMainWindow):
             self.canvas.setPixmap(QPixmap.fromImage(image.copy()))
 
     def toggle_mode(self):
+        """見開き時の切り抜き対象ページを切り替え、表示ラベルを更新する。"""
         self.canvas.toggle_mode()
         label = "2ページ目（青）" if self.canvas.mode == 2 else "1ページ目（赤）"
         self.mode_label.setText(f"現在のモード: {label}")
 
     def update_scan_type(self):
+        """スキャン種別の変更をプレビューウィジェットへ反映する。"""
         is_spread = self.radio_scan_spread.isChecked()
         self.canvas.set_spread_mode(is_spread)
         self.btn_toggle_mode.setEnabled(is_spread)
@@ -214,6 +223,7 @@ class PDFSnipper(QMainWindow):
             self.mode_label.setText("現在のモード: 単一ページ（赤）")
 
     def process_pdf(self):
+        """入力検証後に保存先を選び、PDF/EPUB生成処理を実行する。"""
         if not self._validate_inputs():
             return
 
@@ -225,19 +235,21 @@ class PDFSnipper(QMainWindow):
         try:
             options = self._build_processing_options(save_dir)
             result = process_documents(options, self._update_file_progress)
-            self.progress.setValue(self.progress.maximum())
+            self._set_progress_value(result.page_count, result.page_count)
             message = f"保存完了:\n{result.output_path}"
             if result.ocr_embedded:
                 message += "\n\nOCRテキストを埋め込みました"
             self.status_log.setText(f"完了: {result.file_size_mb:.2f} MB")
             QMessageBox.information(self, "完了", message)
         except Exception as e:
+            self._reset_progress()
             self.status_log.setText("エラー")
             QMessageBox.critical(self, "エラー", f"処理中にエラーが発生しました:\n{e}")
         finally:
             self._set_processing_state(False)
 
     def _validate_inputs(self):
+        """実行に必要なPDF、切り抜き範囲、プレビューの有無を確認する。"""
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "エラー", "ファイルを選択してください")
             return False
@@ -250,6 +262,7 @@ class PDFSnipper(QMainWindow):
         return True
 
     def _build_processing_options(self, save_dir):
+        """現在のUI状態から処理本体へ渡すオプションを作る。"""
         output_format = OUTPUT_PDF if self.radio_pdf.isChecked() else OUTPUT_EPUB
         output_path, output_title = normalize_output_path(
             save_dir,
@@ -274,11 +287,13 @@ class PDFSnipper(QMainWindow):
         )
 
     def _selected_image_processing(self):
+        """UIで選択された画像処理モードを返す。"""
         if self.check_enhance.isChecked():
             return IMAGE_PROCESS_ENHANCE
         return IMAGE_PROCESS_NONE
 
     def _selected_dpi(self):
+        """UIで選択された圧縮レベルに対応するDPIを返す。"""
         if self.radio_none.isChecked():
             return 300
         if self.radio_std.isChecked():
@@ -286,9 +301,11 @@ class PDFSnipper(QMainWindow):
         return 48
 
     def _file_paths(self):
+        """一覧に並んでいるPDFパスを表示順で返す。"""
         return [self.file_list.item(i).data(Qt.UserRole) for i in range(self.file_list.count())]
 
     def _ocr_command(self):
+        """環境変数、ローカルvenv、PATHの順にNDLOCR-Liteコマンドを探す。"""
         env_command = os.environ.get("NDLOCR_LITE_COMMAND")
         if env_command:
             return env_command
@@ -302,34 +319,65 @@ class PDFSnipper(QMainWindow):
         return resolved or "ndlocr-lite"
 
     def _add_file(self, file_path):
+        """PDFパスを表示名付きのリスト項目として追加する。"""
         item = QListWidgetItem(os.path.basename(file_path))
         item.setData(Qt.UserRole, file_path)
         self.file_list.addItem(item)
 
     def _update_file_progress(self, stage, current, total):
-        if stage == "ocr":
-            self.progress.setRange(0, max(1, total))
-            self.progress.setValue(current)
-            self.status_log.setText("OCR処理中" if current < total else "OCR完了")
-            QApplication.processEvents()
-            return
-
-        self.progress.setRange(0, max(1, total))
-        self.progress.setValue(current)
-        self.status_log.setText(f"PDF処理中: {current} / {total}")
+        """処理本体から通知された段階に応じて進捗表示を更新する。"""
+        if stage == "prepare":
+            self._set_progress_value(0, total)
+            self.status_log.setText(f"処理準備中: 0 / {total} ページ")
+        elif stage == "render":
+            self._set_progress_value(current, total)
+            self.status_log.setText(f"ページ画像を生成中: {current} / {total} ページ")
+        elif stage == "ocr":
+            self._set_busy_progress()
+            self.status_log.setText("OCR処理中: NDLOCR-Liteの完了を待っています")
+        elif stage == "ocr_done":
+            self._set_progress_value(current, total)
+            self.status_log.setText(f"OCR完了: {current} / {total} ページ")
+        elif stage == "embed":
+            self._set_progress_value(current, total)
+            self.status_log.setText("OCRテキストを埋め込み中")
+        elif stage == "save":
+            self._set_progress_value(current, total)
+            self.status_log.setText("ファイル保存中")
+        else:
+            self._set_progress_value(current, total)
+            self.status_log.setText(f"処理中: {current} / {total}")
         QApplication.processEvents()
 
     def _set_processing_state(self, is_processing):
+        """実行中かどうかに応じてボタンと初期メッセージを切り替える。"""
         self.btn_run.setEnabled(not is_processing)
-        total_files = self.file_list.count()
-        self.progress.setRange(0, max(1, total_files))
-        self.progress.setFormat("%v / %m" if total_files else "0 / 0")
         if is_processing:
-            self.progress.setValue(0)
-            self.status_log.setText("PDF処理中")
+            self._set_busy_progress()
+            self.status_log.setText("処理を開始しています")
+
+    def _reset_progress(self):
+        """プログレスバーを待機時の空表示へ戻す。"""
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress.setFormat("0 / 0")
+
+    def _set_busy_progress(self):
+        """総量が分からない処理中であることをプログレスバーに表示する。"""
+        self.progress.setRange(0, 0)
+        self.progress.setFormat("")
+
+    def _set_progress_value(self, current, total):
+        """既知の総量に対する現在値をプログレスバーへ反映する。"""
+        total = max(0, total)
+        current = min(max(0, current), total)
+        self.progress.setRange(0, max(1, total))
+        self.progress.setValue(current)
+        self.progress.setFormat(f"{current} / {total}" if total else "0 / 0")
 
     @staticmethod
     def _button_group(*buttons):
+        """複数のラジオボタンを排他的なボタングループへまとめる。"""
         group = QButtonGroup()
         for button in buttons:
             group.addButton(button)
@@ -337,6 +385,7 @@ class PDFSnipper(QMainWindow):
 
     @staticmethod
     def _group_box(title, layout):
+        """指定タイトルとレイアウトを持つQGroupBoxを作る。"""
         group = QGroupBox(title)
         group.setLayout(layout)
         return group

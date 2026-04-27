@@ -97,11 +97,13 @@ def save_as_epub(path, images, title, direction, ocr_pages=None):
 
 
 def _image_size(image_data):
+    """画像バイト列からEPUBページ用の幅と高さを取得する。"""
     pixmap = fitz.Pixmap(image_data)
     return pixmap.width, pixmap.height
 
 
 def _page_xhtml(index, img_name, width, height, ocr_page=None):
+    """1ページ分の画像とOCRレイヤーを含むXHTMLを作る。"""
     ocr_layer = _ocr_layer_xhtml(ocr_page, width, height)
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -166,6 +168,7 @@ def _page_xhtml(index, img_name, width, height, ocr_page=None):
 
 
 def _ocr_layer_xhtml(ocr_page, width, height):
+    """OCR結果を画像上に重ねる透明な位置付きHTMLへ変換する。"""
     if ocr_page is None:
         return ""
     if not ocr_page.lines:
@@ -197,6 +200,7 @@ def _ocr_layer_xhtml(ocr_page, width, height):
 
 
 def _nav_xhtml(title):
+    """EPUB 3用の最小限のナビゲーションXHTMLを作る。"""
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml"

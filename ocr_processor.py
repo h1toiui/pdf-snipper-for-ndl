@@ -52,6 +52,7 @@ def run_ndlocr_lite(image_dir, output_dir, command="ndlocr-lite"):
 
 
 def _build_command(command, image_dir, output_dir):
+    """NDLOCR-Liteを呼び出すためのコマンド引数を組み立てる。"""
     args = shlex.split(os.environ.get("NDLOCR_LITE_COMMAND", command))
     if not args:
         raise RuntimeError("NDLOCR-Lite command is empty.")
@@ -67,6 +68,7 @@ def _build_command(command, image_dir, output_dir):
 
 
 def _collect_ocr_pages(output_dir):
+    """NDLOCR-Liteの出力ディレクトリからページ順にOCR結果を集める。"""
     output_path = Path(output_dir)
     page_paths = sorted(
         path
@@ -77,6 +79,7 @@ def _collect_ocr_pages(output_dir):
 
 
 def _page_from_result_file(path):
+    """JSON/XML/TXTのOCR結果ファイルをOCRPageへ変換する。"""
     suffix = path.suffix.lower()
     if suffix == ".json":
         return _page_from_json(path)
@@ -90,6 +93,7 @@ def _page_from_result_file(path):
 
 
 def _fallback_text_from_json_data(data):
+    """標準構造で読めないJSONから本文らしい文字列を集める。"""
     values = []
     _collect_json_strings(data, values)
     if not values:
@@ -98,6 +102,7 @@ def _fallback_text_from_json_data(data):
 
 
 def _page_from_json(path):
+    """NDLOCR-Lite JSONを読み込み、ページ単位のOCR結果へ変換する。"""
     data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     page = _page_from_ndlocr_json(data)
     if page.text or page.lines:
@@ -106,6 +111,7 @@ def _page_from_json(path):
 
 
 def _page_from_ndlocr_json(data):
+    """NDLOCR-Liteのcontents構造から行情報と段落テキストを作る。"""
     contents = data.get("contents") if isinstance(data, dict) else None
     if not isinstance(contents, list):
         return OCRPage(lines=[], image_width=0, image_height=0, text="")
@@ -132,6 +138,7 @@ def _page_from_ndlocr_json(data):
 
 
 def _ocr_lines_from_block(block):
+    """contentsブロックを再帰的にたどり、OCR行を抽出する。"""
     lines = []
     if isinstance(block, dict):
         line = _ocr_line_from_dict(block)
@@ -146,6 +153,7 @@ def _ocr_lines_from_block(block):
 
 
 def _ocr_line_from_dict(data):
+    """boundingBox付きの辞書から1行分のOCRLineを作る。"""
     text = data.get("text")
     bbox = data.get("boundingBox")
     if not isinstance(text, str) or not text.strip() or not _is_bbox(bbox):
@@ -174,6 +182,7 @@ def _ocr_line_from_dict(data):
 
 
 def _is_bbox(value):
+    """NDLOCR-LiteのboundingBoxとして扱える形か判定する。"""
     return (
         isinstance(value, list)
         and len(value) >= 4
@@ -182,6 +191,7 @@ def _is_bbox(value):
 
 
 def _join_ocr_lines(lines):
+    """同一contentsブロック内のOCR行を段落テキストとして詰める。"""
     joined = ""
     for line in lines:
         line = _normalize_ocr_line(line)
@@ -194,14 +204,17 @@ def _join_ocr_lines(lines):
 
 
 def _normalize_ocr_line(line):
+    """OCR行内の余分な空白と改行を単一空白へ正規化する。"""
     return " ".join(line.strip().split())
 
 
 def _needs_space_between(left, right):
+    """英数字同士を連結するときに空白が必要か判定する。"""
     return left.isascii() and right.isascii() and left.isalnum() and right.isalnum()
 
 
 def _collect_json_strings(value, values):
+    """JSON内の本文キーに紐づく文字列を再帰的に集める。"""
     if isinstance(value, dict):
         for key, item in value.items():
             normalized_key = key.lower()
@@ -218,6 +231,7 @@ def _collect_json_strings(value, values):
 
 
 def _collect_all_json_strings(value, values):
+    """本文キーで見つからない場合にJSON内の全文字列を集める。"""
     if isinstance(value, dict):
         for item in value.values():
             _collect_all_json_strings(item, values)
@@ -231,6 +245,7 @@ def _collect_all_json_strings(value, values):
 
 
 def _text_from_xml(path):
+    """XML形式のOCR結果から本文テキストを抽出する。"""
     root = ET.parse(path).getroot()
     values = []
     for element in root.iter():
