@@ -1,5 +1,7 @@
 # PDF Snipper For NDL
 
+<img width="2340" height="1858" alt="Image" src="https://github.com/user-attachments/assets/b7527242-f20c-4d6f-91de-ac76d9a6aed4" />
+
 国立国会図書館デジタルコレクションから分割ダウンロードしたPDFを、まとめて読みやすいPDFやEPUBにするためのデスクトップアプリです。
 
 PDFを追加して並び替え、必要な範囲を切り抜き、電子書籍リーダー向けに圧縮して出力できます。
