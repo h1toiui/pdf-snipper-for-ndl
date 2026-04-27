@@ -10,15 +10,17 @@ from ocr_processor import run_ndlocr_lite
 from epub_writer import save_as_epub
 
 OCR_DPI = 200
+INVALID_FILENAME_CHARS = '<>:"/\\|?*'
 
 
 def normalize_output_path(save_dir, filename, output_format):
     """保存先、入力名、出力形式から最終的な出力パスとタイトルを作る。"""
-    filename = filename.strip() or "output"
+    title = filename.strip() or "output"
     ext = ".pdf" if output_format == OUTPUT_PDF else ".epub"
-    if not filename.endswith(ext):
-        filename += ext
-    return os.path.join(save_dir, filename), filename
+    if title.lower().endswith(ext):
+        title = title[: -len(ext)]
+    safe_filename = _safe_filename(title) + ext
+    return os.path.join(save_dir, safe_filename), title
 
 
 def process_documents(
@@ -106,6 +108,7 @@ def process_documents(
                 if on_progress is not None:
                     on_progress("embed", total_pages, total_pages)
                 _embed_ocr_in_pdf(new_doc, ocr_pages)
+            _set_pdf_metadata(new_doc, options.output_title, options.output_author)
             if on_progress is not None:
                 on_progress("save", total_pages, total_pages)
             new_doc.save(options.output_path, garbage=3, deflate=True)
@@ -118,6 +121,7 @@ def process_documents(
                 options.output_title,
                 options.epub_direction,
                 ocr_pages=ocr_pages,
+                author=options.output_author,
             )
 
         return ProcessingResult(
@@ -126,6 +130,13 @@ def process_documents(
             file_size_mb=os.path.getsize(options.output_path) / (1024 * 1024),
             ocr_embedded=should_run_ocr,
         )
+
+
+def _safe_filename(value):
+    """ファイル名として使えない文字を取り除く。"""
+    cleaned = "".join("_" if char in INVALID_FILENAME_CHARS else char for char in value)
+    cleaned = cleaned.strip().strip(".")
+    return cleaned or "output"
 
 
 def _count_output_pages(file_paths, crop_count):
@@ -169,6 +180,14 @@ def _embed_ocr_in_pdf(doc, ocr_pages):
                 line.y1 * scale_y,
             )
             _insert_invisible_textbox(page, rect, line.text, line.is_vertical)
+
+
+def _set_pdf_metadata(doc, title, author):
+    """生成PDFへタイトルと著者のメタデータを設定する。"""
+    metadata = dict(doc.metadata or {})
+    metadata["title"] = title.strip()
+    metadata["author"] = author.strip()
+    doc.set_metadata(metadata)
 
 
 def _insert_invisible_textbox(page, rect, text, is_vertical):

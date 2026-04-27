@@ -44,6 +44,8 @@ class PDFSnipper(QMainWindow):
         super().__init__()
         self.setWindowTitle("pdf-snipper for ndl")
         self.resize(1100, 850)
+        self._title_was_edited = False
+        self._author_was_edited = False
         self._build_ui()
 
     def _build_ui(self):
@@ -107,7 +109,7 @@ class PDFSnipper(QMainWindow):
         return self._group_box("2. 切り抜き範囲指定", layout)
 
     def _build_output_group(self):
-        """色、圧縮、形式、OCR、ファイル名の出力オプションを作る。"""
+        """色、圧縮、形式、OCR、書誌情報の出力オプションを作る。"""
         self.check_color = QRadioButton("元のまま")
         self.check_bw = QRadioButton("グレースケール")
         self.check_enhance = QRadioButton("白黒二極化")
@@ -135,8 +137,11 @@ class PDFSnipper(QMainWindow):
         )
         self.check_ocr = QCheckBox("OCRテキストを埋め込む")
 
-        self.filename_input = QLineEdit("女ゲリラたち")
-        self.filename_input.setPlaceholderText("出力ファイル名を入力")
+        self.filename_input = QLineEdit()
+        self.filename_input.textEdited.connect(lambda: setattr(self, "_title_was_edited", True))
+
+        self.author_input = QLineEdit()
+        self.author_input.textEdited.connect(lambda: setattr(self, "_author_was_edited", True))
 
         layout = QVBoxLayout()
         for widget in (
@@ -153,8 +158,10 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_ltr,
             self.radio_epub_rtl,
             self.check_ocr,
-            QLabel("出力ファイル名:"),
+            QLabel("ファイル名:"),
             self.filename_input,
+            QLabel("著者:"),
+            self.author_input,
         ):
             layout.addWidget(widget)
 
@@ -184,6 +191,7 @@ class PDFSnipper(QMainWindow):
             self._add_file(file_path)
 
         if files:
+            self._autofill_output_metadata()
             self.refresh_preview()
 
     def remove_selected_files(self):
@@ -274,6 +282,7 @@ class PDFSnipper(QMainWindow):
             file_paths=self._file_paths(),
             output_path=output_path,
             output_title=output_title,
+            output_author=self.author_input.text().strip(),
             crop_rects=self.canvas.selected_rects(),
             viewport_width=max(1, self.canvas.width()),
             viewport_height=max(1, self.canvas.height()),
@@ -323,6 +332,33 @@ class PDFSnipper(QMainWindow):
         item = QListWidgetItem(os.path.basename(file_path))
         item.setData(Qt.UserRole, file_path)
         self.file_list.addItem(item)
+
+    def _autofill_output_metadata(self):
+        """先頭PDFのメタデータからタイトルと著者を未編集欄へ自動入力する。"""
+        if self.file_list.count() == 0:
+            return
+
+        file_path = self.file_list.item(0).data(Qt.UserRole)
+        try:
+            with fitz.open(file_path) as doc:
+                metadata = doc.metadata or {}
+        except Exception:
+            return
+
+        title = self._metadata_text(metadata, "title")
+        author = self._metadata_text(metadata, "author")
+        if not self._title_was_edited:
+            self.filename_input.setText(title)
+        if not self._author_was_edited:
+            self.author_input.setText(author)
+
+    @staticmethod
+    def _metadata_text(metadata, key):
+        """PyMuPDFのメタデータ辞書から空でない文字列を取り出す。"""
+        value = metadata.get(key, "")
+        if not isinstance(value, str):
+            return ""
+        return value.strip()
 
     def _update_file_progress(self, stage, current, total):
         """処理本体から通知された段階に応じて進捗表示を更新する。"""

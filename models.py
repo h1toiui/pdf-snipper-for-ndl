@@ -18,6 +18,7 @@ class ProcessingOptions:
     file_paths: list[str]
     output_path: str
     output_title: str
+    output_author: str
     crop_rects: list[QRect]
     viewport_width: int
     viewport_height: int

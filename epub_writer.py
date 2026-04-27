@@ -6,11 +6,13 @@ from html import escape
 import fitz
 
 
-def save_as_epub(path, images, title, direction, ocr_pages=None):
-    """画像リストをEPUB 3.0形式で保存する"""
+def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
+    """画像リストと書誌情報をEPUB 3.0形式で保存する。"""
     pub_id = str(uuid.uuid4())
     mod_time = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
     safe_title = escape(title)
+    safe_author = escape(author.strip())
+    creator_meta = f"\n    <dc:creator>{safe_author}</dc:creator>" if safe_author else ""
     ocr_pages = ocr_pages or []
 
     with zipfile.ZipFile(path, "w") as zf:
@@ -59,7 +61,7 @@ def save_as_epub(path, images, title, direction, ocr_pages=None):
 <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" version="3.0" prefix="rendition: http://www.idpf.org/vocab/rendition/#">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="pub-id">{pub_id}</dc:identifier>
-    <dc:title>{safe_title}</dc:title>
+    <dc:title>{safe_title}</dc:title>{creator_meta}
     <dc:language>ja</dc:language>
     <meta property="dcterms:modified">{mod_time}</meta>
     <meta property="rendition:layout">pre-paginated</meta>
