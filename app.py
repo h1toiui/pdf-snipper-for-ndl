@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -36,17 +37,19 @@ from models import (
     ProcessingOptions,
 )
 from pdf_processor import normalize_output_path, process_documents
-from widgets import SelectionLabel
+from widgets import SELECTION_SPREAD, SELECTION_TWO_PAGE, SelectionLabel
 
 
 class PDFSnipper(QMainWindow):
     def __init__(self):
         """メインウィンドウを初期化してUIを構築する。"""
         super().__init__()
-        self.setWindowTitle("pdf-snipper for ndl")
+        self.setWindowTitle("PDF Snipper For NDL")
         self.resize(1100, 850)
         self._title_was_edited = False
         self._author_was_edited = False
+        self._preview_page_index = 0
+        self._preview_page_count = 0
         self._build_ui()
 
     def _build_ui(self):
@@ -68,13 +71,34 @@ class PDFSnipper(QMainWindow):
         self.canvas = SelectionLabel()
         self.canvas.setStyleSheet("border: 2px solid #ccc; background-color: #eee;")
 
+        self.btn_preview_previous = QPushButton("←")
+        self.btn_preview_previous.clicked.connect(lambda: self.change_preview_page(-1))
+        self.preview_page_label = QLabel("0 / 0")
+        self.preview_page_label.setAlignment(Qt.AlignCenter)
+        self.btn_preview_next = QPushButton("→")
+        self.btn_preview_next.clicked.connect(lambda: self.change_preview_page(1))
+
+        preview_controls = QHBoxLayout()
+        preview_controls.addStretch()
+        preview_controls.addWidget(self.btn_preview_previous)
+        preview_controls.addWidget(self.preview_page_label)
+        preview_controls.addWidget(self.btn_preview_next)
+        preview_controls.addStretch()
+
+        preview_layout = QVBoxLayout()
+        preview_layout.addWidget(self.canvas, 1)
+        preview_layout.addLayout(preview_controls)
+        preview_widget = QWidget()
+        preview_widget.setLayout(preview_layout)
+
         main_layout = QHBoxLayout()
         main_layout.addWidget(side_scroll, 1)
-        main_layout.addWidget(self.canvas, 3)
+        main_layout.addWidget(preview_widget, 3)
 
         container = QWidget()
         container.setLayout(main_layout)
         self.setCentralWidget(container)
+        self._update_preview_controls()
 
     def _build_file_group(self):
         """PDF追加、解除、並び替え用のUIグループを作る。"""
@@ -96,25 +120,29 @@ class PDFSnipper(QMainWindow):
 
     def _build_crop_group(self):
         """スキャン種別と切り抜き範囲指定用のUIグループを作る。"""
-        self.radio_scan_spread = QRadioButton("見開き")
-        self.radio_scan_single = QRadioButton("単一ページ")
-        self.radio_scan_spread.setChecked(True)
-        self.scan_type_group = self._button_group(
-            self.radio_scan_spread,
-            self.radio_scan_single,
+        self.radio_mode_spread = QRadioButton("見開き（1つの枠）")
+        self.radio_mode_two_page = QRadioButton("2P（左右2つの枠）")
+        self.radio_mode_spread.setChecked(True)
+        self.selection_mode_group = self._button_group(
+            self.radio_mode_spread,
+            self.radio_mode_two_page,
         )
-        self.radio_scan_spread.toggled.connect(self.update_scan_type)
+        self.radio_mode_spread.toggled.connect(self.update_selection_mode)
+        self.radio_mode_two_page.toggled.connect(self.update_selection_mode)
 
-        self.mode_label = QLabel("現在のモード: 1ページ目（赤）")
-        self.btn_toggle_mode = QPushButton("1P / 2P切替")
-        self.btn_toggle_mode.clicked.connect(self.toggle_mode)
+        self.aspect_ratio_combo = QComboBox()
+        self.aspect_ratio_combo.addItem("自由選択", "free")
+        self.aspect_ratio_combo.addItem("元のアスペクト比", "source")
+        self.aspect_ratio_combo.addItem("9 : 16（スマートフォン縦）", 9 / 16)
+        self.aspect_ratio_combo.addItem("1 : 1.414（A判・B判）", 1 / 1.414)
+        self.aspect_ratio_combo.currentIndexChanged.connect(self.update_aspect_ratio)
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("スキャンタイプ:"))
-        layout.addWidget(self.radio_scan_spread)
-        layout.addWidget(self.radio_scan_single)
-        layout.addWidget(self.mode_label)
-        layout.addWidget(self.btn_toggle_mode)
+        layout.addWidget(QLabel("ページ分割:"))
+        layout.addWidget(self.radio_mode_spread)
+        layout.addWidget(self.radio_mode_two_page)
+        layout.addWidget(QLabel("アスペクト比:"))
+        layout.addWidget(self.aspect_ratio_combo)
         return self._group_box("2. 切り抜き範囲指定", layout)
 
     def _build_output_group(self):
@@ -212,43 +240,88 @@ class PDFSnipper(QMainWindow):
 
         if files:
             self._autofill_output_metadata()
-            self.refresh_preview()
+            self.refresh_preview(reset_page=True)
 
     def remove_selected_files(self):
         """一覧で選択中のPDFを処理対象から外す。"""
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
-        self.refresh_preview()
+        self.refresh_preview(reset_page=True)
 
-    def refresh_preview(self):
-        """先頭PDFの中間ページを読み込み、切り抜き用プレビューへ表示する。"""
+    def refresh_preview(self, reset_page=False):
+        """先頭PDFの現在ページを切り抜き用プレビューへ表示する。"""
         if self.file_list.count() == 0:
             self.canvas.clear()
             self.canvas.clear_selection()
+            self._preview_page_index = 0
+            self._preview_page_count = 0
+            self._update_preview_controls()
             return
 
         first_file = self.file_list.item(0).data(Qt.UserRole)
         with fitz.open(first_file) as doc:
-            page = doc[len(doc) // 2]
-            pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))
+            self._preview_page_count = len(doc)
+            if reset_page:
+                self._preview_page_index = len(doc) // 2
+                self.canvas.clear_selection()
+            self._preview_page_index = min(
+                max(0, self._preview_page_index),
+                max(0, len(doc) - 1),
+            )
+
+            first_page = doc[0]
+            self.canvas.set_source_aspect_ratio(
+                first_page.rect.width / max(1, first_page.rect.height)
+            )
+            if self.aspect_ratio_combo.currentData() == "source":
+                self.canvas.set_aspect_ratio(self.canvas.source_aspect_ratio)
+
+            page = doc[self._preview_page_index]
+            pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csRGB)
             image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
             self.canvas.setPixmap(QPixmap.fromImage(image.copy()))
+        self._update_preview_controls()
 
-    def toggle_mode(self):
-        """見開き時の切り抜き対象ページを切り替え、表示ラベルを更新する。"""
-        self.canvas.toggle_mode()
-        label = "2ページ目（青）" if self.canvas.mode == 2 else "1ページ目（赤）"
-        self.mode_label.setText(f"現在のモード: {label}")
+    def change_preview_page(self, offset):
+        """先頭PDF内のプレビューページを前後へ移動する。"""
+        if self._preview_page_count == 0:
+            return
+        target = min(
+            max(0, self._preview_page_index + offset),
+            self._preview_page_count - 1,
+        )
+        if target == self._preview_page_index:
+            return
+        self._preview_page_index = target
+        self.refresh_preview()
 
-    def update_scan_type(self):
-        """スキャン種別の変更をプレビューウィジェットへ反映する。"""
-        is_spread = self.radio_scan_spread.isChecked()
-        self.canvas.set_spread_mode(is_spread)
-        self.btn_toggle_mode.setEnabled(is_spread)
-        if is_spread:
-            self.mode_label.setText("現在のモード: 1ページ目（赤）")
+    def update_selection_mode(self, checked):
+        """見開き・2P設定を選択ウィジェットへ反映する。"""
+        if not checked:
+            return
+        mode = SELECTION_SPREAD if self.radio_mode_spread.isChecked() else SELECTION_TWO_PAGE
+        self.canvas.set_selection_mode(mode)
+
+    def update_aspect_ratio(self, index=None):
+        """選択中のアスペクト比を選択ウィジェットへ反映する。"""
+        value = self.aspect_ratio_combo.currentData()
+        if value == "free":
+            ratio = None
+        elif value == "source":
+            ratio = self.canvas.source_aspect_ratio
         else:
-            self.mode_label.setText("現在のモード: 単一ページ（赤）")
+            ratio = float(value)
+        self.canvas.set_aspect_ratio(ratio)
+
+    def _update_preview_controls(self):
+        """ページ番号と前後ページボタンの有効状態を更新する。"""
+        has_pages = self._preview_page_count > 0
+        current = self._preview_page_index + 1 if has_pages else 0
+        self.preview_page_label.setText(f"{current} / {self._preview_page_count}")
+        self.btn_preview_previous.setEnabled(has_pages and self._preview_page_index > 0)
+        self.btn_preview_next.setEnabled(
+            has_pages and self._preview_page_index < self._preview_page_count - 1
+        )
 
     def process_pdf(self):
         """入力検証後に保存先を選び、PDF/EPUB生成処理を実行する。"""
