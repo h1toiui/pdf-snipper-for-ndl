@@ -285,6 +285,21 @@ class SelectionLabelTest(unittest.TestCase):
                 self.widget._update_cursor(point)
                 self.assertEqual(self.widget.cursor().shape(), Qt.SizeHorCursor)
 
+    def test_fixed_ratio_left_right_handles_follow_mouse_x(self):
+        self.widget.set_aspect_ratio(9 / 16)
+        original = QRect(100, 100, 160, 284)
+        self.widget._drag_start_rect = original
+
+        self.widget._active_handle = HANDLE_LEFT
+        result_left = self.widget._fixed_ratio_resized_rect(QPoint(60, original.center().y()))
+        self.assertEqual(result_left.left(), 60)
+        self.assertAlmostEqual(result_left.width() / result_left.height(), 9 / 16, places=2)
+
+        self.widget._active_handle = HANDLE_RIGHT
+        result_right = self.widget._fixed_ratio_resized_rect(QPoint(290, original.center().y()))
+        self.assertEqual(result_right.right(), 290)
+        self.assertAlmostEqual(result_right.width() / result_right.height(), 9 / 16, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()

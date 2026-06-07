@@ -191,7 +191,7 @@ class SelectionLabel(QLabel):
         painter.drawPixmap(self._display_rect(), self._pixmap)
         self._draw_selection(painter, self.rect_p1, QColor("#e00000"), self._page1_label())
         if self.selection_mode == SELECTION_TWO_PAGE:
-            self._draw_selection(painter, self.rect_p2, QColor("#0057d9"), "Page2")
+            self._draw_selection(painter, self.rect_p2, QColor("#0057d9"), "Page 2")
 
     def _create_initial_selection(self):
         """現在の設定に従う選択枠を画像中央へ生成する。"""
@@ -210,8 +210,8 @@ class SelectionLabel(QLabel):
         total_width = width * 2 + gap
         left = (image_width - total_width) / 2
         top = (image_height - height) / 2
-        self.rect_p1 = QRect(round(left), round(top), round(width), round(height))
-        self.rect_p2 = QRect(
+        self.rect_p2 = QRect(round(left), round(top), round(width), round(height))
+        self.rect_p1 = QRect(
             round(left + width + gap),
             round(top),
             round(width),
@@ -267,11 +267,42 @@ class SelectionLabel(QLabel):
         ratio = self.aspect_ratio
         x0, y0, x1, y1 = self._rect_bounds(self._drag_start_rect)
 
-        if self._active_handle in (HANDLE_TOP, HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT):
+        if self._active_handle == HANDLE_LEFT:
+            fixed_x = x1
+            new_x0 = min(max(0, image_pos.x()), x1 - MIN_SELECTION_SIZE)
+            width = max(MIN_SELECTION_SIZE, fixed_x - new_x0)
+            height = width / ratio
+            new_x1 = fixed_x
+            center_y = (y0 + y1) / 2
+            new_y0 = center_y - height / 2
+            new_y1 = center_y + height / 2
+        elif self._active_handle == HANDLE_RIGHT:
+            fixed_x = x0
+            new_x1 = max(min(image_pos.x(), self.image_width()), x0 + MIN_SELECTION_SIZE)
+            width = max(MIN_SELECTION_SIZE, new_x1 - fixed_x)
+            height = width / ratio
+            new_x0 = fixed_x
+            center_y = (y0 + y1) / 2
+            new_y0 = center_y - height / 2
+            new_y1 = center_y + height / 2
+        elif self._active_handle in (HANDLE_TOP, HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT):
             fixed_y = y1
             height = max(MIN_SELECTION_SIZE, fixed_y - image_pos.y())
             new_y0 = fixed_y - height
             new_y1 = fixed_y
+            width = height * ratio
+            if self._active_handle == HANDLE_TOP_LEFT:
+                fixed_x = x1
+                new_x1 = fixed_x
+                new_x0 = fixed_x - width
+            elif self._active_handle == HANDLE_TOP_RIGHT:
+                fixed_x = x0
+                new_x0 = fixed_x
+                new_x1 = fixed_x + width
+            else:
+                center_x = (x0 + x1) / 2
+                new_x0 = center_x - width / 2
+                new_x1 = center_x + width / 2
         elif self._active_handle in (
             HANDLE_BOTTOM,
             HANDLE_BOTTOM_LEFT,
@@ -281,27 +312,26 @@ class SelectionLabel(QLabel):
             height = max(MIN_SELECTION_SIZE, image_pos.y() - fixed_y)
             new_y0 = fixed_y
             new_y1 = fixed_y + height
+            width = height * ratio
+            if self._active_handle == HANDLE_BOTTOM_LEFT:
+                fixed_x = x1
+                new_x1 = fixed_x
+                new_x0 = fixed_x - width
+            elif self._active_handle == HANDLE_BOTTOM_RIGHT:
+                fixed_x = x0
+                new_x0 = fixed_x
+                new_x1 = fixed_x + width
+            else:
+                center_x = (x0 + x1) / 2
+                new_x0 = center_x - width / 2
+                new_x1 = center_x + width / 2
         else:
             delta_y = image_pos.y() - self._drag_start.y()
             height = max(MIN_SELECTION_SIZE, self._drag_start_rect.height() + delta_y * 2)
             center_y = (y0 + y1) / 2
             new_y0 = center_y - height / 2
             new_y1 = center_y + height / 2
-
-        width = height * ratio
-        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT, HANDLE_LEFT):
-            fixed_x = x1
-            new_x1 = fixed_x
-            new_x0 = fixed_x - width
-        elif self._active_handle in (
-            HANDLE_TOP_RIGHT,
-            HANDLE_BOTTOM_RIGHT,
-            HANDLE_RIGHT,
-        ):
-            fixed_x = x0
-            new_x0 = fixed_x
-            new_x1 = fixed_x + width
-        else:
+            width = height * ratio
             center_x = (x0 + x1) / 2
             new_x0 = center_x - width / 2
             new_x1 = center_x + width / 2
@@ -356,7 +386,7 @@ class SelectionLabel(QLabel):
         painter.setBrush(Qt.NoBrush)
 
     def _page1_label(self):
-        return "Page" if self.selection_mode == SELECTION_SPREAD else "Page1"
+        return "Page" if self.selection_mode == SELECTION_SPREAD else "Page 1"
 
     def _hit_test(self, widget_pos):
         for name, image_rect in reversed(self._selection_items()):

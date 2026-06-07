@@ -71,7 +71,7 @@ class PDFSnipper(QMainWindow):
         self.canvas = SelectionLabel()
         self.canvas.setStyleSheet("border: 2px solid #ccc; background-color: #eee;")
 
-        self.btn_preview_previous = QPushButton("︿")
+        self.btn_preview_previous = QPushButton("↑")
         self.btn_preview_previous.setFixedSize(28, 24)
         self.btn_preview_previous.setAutoRepeat(True)
         self.btn_preview_previous.setAutoRepeatDelay(300)
@@ -79,7 +79,7 @@ class PDFSnipper(QMainWindow):
         self.btn_preview_previous.clicked.connect(lambda: self.change_preview_page(-1))
         self.preview_page_label = QLabel("0 / 0")
         self.preview_page_label.setAlignment(Qt.AlignCenter)
-        self.btn_preview_next = QPushButton("﹀")
+        self.btn_preview_next = QPushButton("↓")
         self.btn_preview_next.setFixedSize(28, 24)
         self.btn_preview_next.setAutoRepeat(True)
         self.btn_preview_next.setAutoRepeatDelay(300)
@@ -133,8 +133,8 @@ class PDFSnipper(QMainWindow):
 
     def _build_crop_group(self):
         """スキャン種別と切り抜き範囲指定用のUIグループを作る。"""
-        self.radio_mode_spread = QRadioButton("見開き（1つの枠）")
-        self.radio_mode_two_page = QRadioButton("2P（左右2つの枠）")
+        self.radio_mode_spread = QRadioButton("見開き")
+        self.radio_mode_two_page = QRadioButton("左右分割")
         self.radio_mode_spread.setChecked(True)
         self.selection_mode_group = self._button_group(
             self.radio_mode_spread,
@@ -151,7 +151,7 @@ class PDFSnipper(QMainWindow):
         self.aspect_ratio_combo.currentIndexChanged.connect(self.update_aspect_ratio)
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("ページ分割:"))
+        layout.addWidget(QLabel("切り抜きモード:"))
         layout.addWidget(self.radio_mode_spread)
         layout.addWidget(self.radio_mode_two_page)
         layout.addWidget(QLabel("アスペクト比:"))
