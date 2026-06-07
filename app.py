@@ -48,8 +48,8 @@ class PDFSnipper(QMainWindow):
         self.resize(1100, 850)
         self._title_was_edited = False
         self._author_was_edited = False
-        self._preview_page_index = 0
-        self._preview_page_count = 0
+        self._preview_global_page_index = 0
+        self._preview_total_page_count = 0
         self._build_ui()
 
     def _build_ui(self):
@@ -71,16 +71,16 @@ class PDFSnipper(QMainWindow):
         self.canvas = SelectionLabel()
         self.canvas.setStyleSheet("border: 2px solid #ccc; background-color: #eee;")
 
-        self.btn_preview_previous = QPushButton("↑")
-        self.btn_preview_previous.setFixedSize(28, 24)
+        self.btn_preview_previous = QPushButton("前へ")
+        self.btn_preview_previous.setFixedSize(40, 24)
         self.btn_preview_previous.setAutoRepeat(True)
         self.btn_preview_previous.setAutoRepeatDelay(300)
         self.btn_preview_previous.setAutoRepeatInterval(120)
         self.btn_preview_previous.clicked.connect(lambda: self.change_preview_page(-1))
         self.preview_page_label = QLabel("0 / 0")
         self.preview_page_label.setAlignment(Qt.AlignCenter)
-        self.btn_preview_next = QPushButton("↓")
-        self.btn_preview_next.setFixedSize(28, 24)
+        self.btn_preview_next = QPushButton("次へ")
+        self.btn_preview_next.setFixedSize(40, 24)
         self.btn_preview_next.setAutoRepeat(True)
         self.btn_preview_next.setAutoRepeatDelay(300)
         self.btn_preview_next.setAutoRepeatInterval(120)
@@ -124,6 +124,8 @@ class PDFSnipper(QMainWindow):
         self.file_list = QListWidget()
         self.file_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.file_list.model().rowsMoved.connect(self._renumber_file_list)
+        self.file_list.model().rowsMoved.connect(self.refresh_preview)
 
         layout = QVBoxLayout()
         layout.addWidget(self.btn_select)
@@ -248,64 +250,94 @@ class PDFSnipper(QMainWindow):
     def select_files(self):
         """ファイルダイアログで選ばれたPDFを一覧へ追加する。"""
         files, _ = QFileDialog.getOpenFileNames(self, "PDFを選択", "", "PDF Files (*.pdf)")
+        is_first_add = self.file_list.count() == 0
         for file_path in sorted(files):
             self._add_file(file_path)
 
         if files:
             self._autofill_output_metadata()
-            self.refresh_preview(reset_page=True)
+            self.refresh_preview(reset_page=is_first_add)
 
     def remove_selected_files(self):
         """一覧で選択中のPDFを処理対象から外す。"""
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
-        self.refresh_preview(reset_page=True)
+        self.refresh_preview(reset_page=False)
 
     def refresh_preview(self, reset_page=False):
-        """先頭PDFの現在ページを切り抜き用プレビューへ表示する。"""
+        """複合PDFのグローバルページを切り抜き用プレビューへ表示する。"""
         if self.file_list.count() == 0:
             self.canvas.clear()
             self.canvas.clear_selection()
-            self._preview_page_index = 0
-            self._preview_page_count = 0
+            self._preview_global_page_index = 0
+            self._preview_total_page_count = 0
             self._update_preview_controls()
             return
 
-        first_file = self.file_list.item(0).data(Qt.UserRole)
-        with fitz.open(first_file) as doc:
-            self._preview_page_count = len(doc)
-            if reset_page:
-                self._preview_page_index = len(doc) // 2
-                self.canvas.clear_selection()
-            self._preview_page_index = min(
-                max(0, self._preview_page_index),
-                max(0, len(doc) - 1),
-            )
+        # 全ファイルの総ページ数を計算
+        page_offsets = []  # [0, pages_in_file0, pages_in_file0 + pages_in_file1, ...]
+        total_pages = 0
+        for i in range(self.file_list.count()):
+            file_path = self.file_list.item(i).data(Qt.UserRole)
+            try:
+                with fitz.open(file_path) as doc:
+                    page_offsets.append(total_pages)
+                    total_pages += len(doc)
+            except Exception:
+                page_offsets.append(total_pages)
+        page_offsets.append(total_pages)
 
-            first_page = doc[0]
-            self.canvas.set_source_aspect_ratio(
-                first_page.rect.width / max(1, first_page.rect.height)
-            )
-            if self.aspect_ratio_combo.currentData() == "source":
-                self.canvas.set_aspect_ratio(self.canvas.source_aspect_ratio)
+        self._preview_total_page_count = total_pages
+        if reset_page:
+            self._preview_global_page_index = total_pages // 2
+            self.canvas.clear_selection()
+        self._preview_global_page_index = min(
+            max(0, self._preview_global_page_index),
+            max(0, total_pages - 1),
+        )
 
-            page = doc[self._preview_page_index]
-            pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csRGB)
-            image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
-            self.canvas.setPixmap(QPixmap.fromImage(image.copy()))
+        # グローバルページインデックスから、どのファイルの何ページ目かを確定
+        file_index = 0
+        local_page_index = self._preview_global_page_index
+        for i in range(self.file_list.count()):
+            file_start = page_offsets[i]
+            file_end = page_offsets[i + 1]
+            if file_start <= self._preview_global_page_index < file_end:
+                file_index = i
+                local_page_index = self._preview_global_page_index - file_start
+                break
+
+        # 対象ファイルを開き、そのページを表示
+        file_path = self.file_list.item(file_index).data(Qt.UserRole)
+        try:
+            with fitz.open(file_path) as doc:
+                first_page = doc[0]
+                self.canvas.set_source_aspect_ratio(
+                    first_page.rect.width / max(1, first_page.rect.height)
+                )
+                if self.aspect_ratio_combo.currentData() == "source":
+                    self.canvas.set_aspect_ratio(self.canvas.source_aspect_ratio)
+
+                page = doc[local_page_index]
+                pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csRGB)
+                image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
+                self.canvas.setPixmap(QPixmap.fromImage(image.copy()))
+        except Exception:
+            self.canvas.clear()
+
         self._update_preview_controls()
 
     def change_preview_page(self, offset):
-        """先頭PDF内のプレビューページを前後へ移動する。"""
-        if self._preview_page_count == 0:
+        """複合PDFのグローバルページを前後へ移動する。"""
+        if self._preview_total_page_count == 0:
             return
         target = min(
-            max(0, self._preview_page_index + offset),
-            self._preview_page_count - 1,
+            max(0, self._preview_global_page_index + offset),
+            self._preview_total_page_count - 1,
         )
-        if target == self._preview_page_index:
+        if target == self._preview_global_page_index:
             return
-        self._preview_page_index = target
+        self._preview_global_page_index = target
         self.refresh_preview()
 
     def update_selection_mode(self, checked):
@@ -328,12 +360,12 @@ class PDFSnipper(QMainWindow):
 
     def _update_preview_controls(self):
         """ページ番号と前後ページボタンの有効状態を更新する。"""
-        has_pages = self._preview_page_count > 0
-        current = self._preview_page_index + 1 if has_pages else 0
-        self.preview_page_label.setText(f"{current} / {self._preview_page_count}")
-        self.btn_preview_previous.setEnabled(has_pages and self._preview_page_index > 0)
+        has_pages = self._preview_total_page_count > 0
+        current = self._preview_global_page_index + 1 if has_pages else 0
+        self.preview_page_label.setText(f"{current} / {self._preview_total_page_count}")
+        self.btn_preview_previous.setEnabled(has_pages and self._preview_global_page_index > 0)
         self.btn_preview_next.setEnabled(
-            has_pages and self._preview_page_index < self._preview_page_count - 1
+            has_pages and self._preview_global_page_index < self._preview_total_page_count - 1
         )
 
     def process_pdf(self):
@@ -435,9 +467,19 @@ class PDFSnipper(QMainWindow):
 
     def _add_file(self, file_path):
         """PDFパスを表示名付きのリスト項目として追加する。"""
-        item = QListWidgetItem(os.path.basename(file_path))
+        count = self.file_list.count() + 1
+        display_text = f"{count}. {os.path.basename(file_path)}"
+        item = QListWidgetItem(display_text)
         item.setData(Qt.UserRole, file_path)
         self.file_list.addItem(item)
+
+    def _renumber_file_list(self):
+        """ファイルリストの項目番号を更新する。"""
+        for i in range(self.file_list.count()):
+            item = self.file_list.item(i)
+            file_path = item.data(Qt.UserRole)
+            display_text = f"{i + 1}. {os.path.basename(file_path)}"
+            item.setText(display_text)
 
     def _autofill_output_metadata(self):
         """先頭PDFのメタデータからタイトルと著者を未編集欄へ自動入力する。"""
