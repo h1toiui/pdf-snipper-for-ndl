@@ -266,20 +266,21 @@ class SelectionLabel(QLabel):
     def _fixed_ratio_resized_rect(self, image_pos):
         ratio = self.aspect_ratio
         x0, y0, x1, y1 = self._rect_bounds(self._drag_start_rect)
-        center_x = (x0 + x1) / 2
 
         if self._active_handle in (HANDLE_TOP, HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT):
-            new_y1 = y1
-            height = max(MIN_SELECTION_SIZE, new_y1 - image_pos.y())
-            new_y0 = new_y1 - height
+            fixed_y = y1
+            height = max(MIN_SELECTION_SIZE, fixed_y - image_pos.y())
+            new_y0 = fixed_y - height
+            new_y1 = fixed_y
         elif self._active_handle in (
             HANDLE_BOTTOM,
             HANDLE_BOTTOM_LEFT,
             HANDLE_BOTTOM_RIGHT,
         ):
-            new_y0 = y0
-            height = max(MIN_SELECTION_SIZE, image_pos.y() - new_y0)
-            new_y1 = new_y0 + height
+            fixed_y = y0
+            height = max(MIN_SELECTION_SIZE, image_pos.y() - fixed_y)
+            new_y0 = fixed_y
+            new_y1 = fixed_y + height
         else:
             delta_y = image_pos.y() - self._drag_start.y()
             height = max(MIN_SELECTION_SIZE, self._drag_start_rect.height() + delta_y * 2)
@@ -288,17 +289,20 @@ class SelectionLabel(QLabel):
             new_y1 = center_y + height / 2
 
         width = height * ratio
-        if self._active_handle in (HANDLE_LEFT, HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT):
-            new_x1 = x1
-            new_x0 = new_x1 - width
+        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT, HANDLE_LEFT):
+            fixed_x = x1
+            new_x1 = fixed_x
+            new_x0 = fixed_x - width
         elif self._active_handle in (
-            HANDLE_RIGHT,
             HANDLE_TOP_RIGHT,
             HANDLE_BOTTOM_RIGHT,
+            HANDLE_RIGHT,
         ):
-            new_x0 = x0
-            new_x1 = new_x0 + width
+            fixed_x = x0
+            new_x0 = fixed_x
+            new_x1 = fixed_x + width
         else:
+            center_x = (x0 + x1) / 2
             new_x0 = center_x - width / 2
             new_x1 = center_x + width / 2
 
@@ -375,12 +379,8 @@ class SelectionLabel(QLabel):
         _, handle = target
         cursors = {
             None: Qt.SizeAllCursor,
-            HANDLE_LEFT: (
-                Qt.SizeVerCursor if self.aspect_ratio is not None else Qt.SizeHorCursor
-            ),
-            HANDLE_RIGHT: (
-                Qt.SizeVerCursor if self.aspect_ratio is not None else Qt.SizeHorCursor
-            ),
+            HANDLE_LEFT: Qt.SizeHorCursor,
+            HANDLE_RIGHT: Qt.SizeHorCursor,
             HANDLE_TOP: Qt.SizeVerCursor,
             HANDLE_BOTTOM: Qt.SizeVerCursor,
             HANDLE_TOP_LEFT: Qt.SizeFDiagCursor,
@@ -415,14 +415,49 @@ class SelectionLabel(QLabel):
         if other_rect.isNull():
             return
 
-        center = other_rect.center()
         width = source_rect.width()
         height = source_rect.height()
-        x = center.x() - width // 2
-        y = center.y() - height // 2
-        x = min(max(0, x), self.image_width() - width)
-        y = min(max(0, y), self.image_height() - height)
-        self._set_rect_by_name(other_name, QRect(x, y, width, height))
+        fixed_x, fixed_y = self._sync_other_rect_fixed_point(other_rect)
+
+        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT, HANDLE_LEFT):
+            x = fixed_x - width + 1
+        elif self._active_handle in (HANDLE_TOP_RIGHT, HANDLE_BOTTOM_RIGHT, HANDLE_RIGHT):
+            x = fixed_x
+        else:
+            x = round(fixed_x - width / 2)
+
+        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT, HANDLE_TOP):
+            y = fixed_y - height + 1
+        elif self._active_handle in (HANDLE_BOTTOM_LEFT, HANDLE_BOTTOM_RIGHT, HANDLE_BOTTOM):
+            y = fixed_y
+        else:
+            y = round(fixed_y - height / 2)
+
+        rect = QRect(x, y, width, height)
+        rect = self._clamp_rect_to_image(rect)
+        self._set_rect_by_name(other_name, rect)
+
+    def _sync_other_rect_fixed_point(self, rect):
+        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT, HANDLE_LEFT):
+            fixed_x = rect.right()
+        elif self._active_handle in (HANDLE_TOP_RIGHT, HANDLE_BOTTOM_RIGHT, HANDLE_RIGHT):
+            fixed_x = rect.left()
+        else:
+            fixed_x = rect.center().x()
+
+        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT, HANDLE_TOP):
+            fixed_y = rect.bottom()
+        elif self._active_handle in (HANDLE_BOTTOM_LEFT, HANDLE_BOTTOM_RIGHT, HANDLE_BOTTOM):
+            fixed_y = rect.top()
+        else:
+            fixed_y = rect.center().y()
+
+        return fixed_x, fixed_y
+
+    def _clamp_rect_to_image(self, rect):
+        x = min(max(0, rect.x()), self.image_width() - rect.width())
+        y = min(max(0, rect.y()), self.image_height() - rect.height())
+        return QRect(x, y, rect.width(), rect.height())
 
     def _reset_operation(self):
         self._operation = None

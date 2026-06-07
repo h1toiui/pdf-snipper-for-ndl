@@ -3,13 +3,17 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QPoint, QRect, Qt, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
 from widgets import (
+    HANDLE_BOTTOM,
     HANDLE_BOTTOM_LEFT,
     HANDLE_BOTTOM_RIGHT,
+    HANDLE_LEFT,
+    HANDLE_RIGHT,
+    HANDLE_TOP,
     HANDLE_TOP_LEFT,
     HANDLE_TOP_RIGHT,
     SELECTION_TWO_PAGE,
@@ -108,6 +112,57 @@ class SelectionLabelTest(unittest.TestCase):
                     places=2,
                 )
 
+    def test_fixed_ratio_corner_resize_anchors_opposite_corner(self):
+        self.widget.set_aspect_ratio(9 / 16)
+        original = QRect(100, 100, 160, 284)
+        self.widget._drag_start_rect = original
+
+        anchors = {
+            HANDLE_TOP_LEFT: (original.bottomRight(), "bottomRight"),
+            HANDLE_TOP_RIGHT: (original.bottomLeft(), "bottomLeft"),
+            HANDLE_BOTTOM_LEFT: (original.topRight(), "topRight"),
+            HANDLE_BOTTOM_RIGHT: (original.topLeft(), "topLeft"),
+        }
+
+        for handle, (fixed_point, fixed_name) in anchors.items():
+            with self.subTest(handle=handle):
+                self.widget._active_handle = handle
+                target_y = (
+                    original.bottom() - 128
+                    if handle in (HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT)
+                    else original.y() + 128
+                )
+                result = self.widget._fixed_ratio_resized_rect(QPoint(original.x(), target_y))
+                if fixed_name == "bottomRight":
+                    self.assertEqual(result.bottomRight(), fixed_point)
+                elif fixed_name == "bottomLeft":
+                    self.assertEqual(result.bottomLeft(), fixed_point)
+                elif fixed_name == "topRight":
+                    self.assertEqual(result.topRight(), fixed_point)
+                else:
+                    self.assertEqual(result.topLeft(), fixed_point)
+                self.assertAlmostEqual(result.width() / result.height(), 9 / 16, places=2)
+
+    def test_fixed_ratio_side_handles_fix_horizontal_anchor(self):
+        self.widget.set_aspect_ratio(9 / 16)
+        original = QRect(100, 100, 160, 284)
+        self.widget._drag_start_rect = original
+        self.widget._drag_start = QPoint(original.left(), original.center().y())
+
+        for handle in (HANDLE_LEFT, HANDLE_RIGHT):
+            with self.subTest(handle=handle):
+                self.widget._active_handle = handle
+                target = QPoint(
+                    original.left() - 20 if handle == HANDLE_LEFT else original.right() + 20,
+                    original.center().y(),
+                )
+                result = self.widget._fixed_ratio_resized_rect(target)
+                if handle == HANDLE_LEFT:
+                    self.assertEqual(result.right(), original.right())
+                else:
+                    self.assertEqual(result.left(), original.left())
+                self.assertAlmostEqual(result.width() / result.height(), 9 / 16, places=2)
+
     def test_fixed_ratio_two_page_resize_syncs_both_directions(self):
         self.widget.set_selection_mode(SELECTION_TWO_PAGE)
         self.widget.set_aspect_ratio(9 / 16)
@@ -121,12 +176,79 @@ class SelectionLabelTest(unittest.TestCase):
                 setattr(self.widget, other_name, QRect(600, 100, 120, 213))
                 self.widget._operation = "resize"
                 self.widget._active_rect_name = active_name
-                source_rect = getattr(self.widget, active_name)
+                self.widget._active_handle = HANDLE_TOP_LEFT
+                source_rect = QRect(0, 0, 120, 213)
 
+                original_other = getattr(self.widget, other_name)
                 self.widget._sync_other_rect_size(source_rect)
 
                 other_rect = getattr(self.widget, other_name)
                 self.assertEqual(other_rect.size(), source_rect.size())
+                self.assertEqual(other_rect.bottomRight(), original_other.bottomRight())
+
+    def test_fixed_ratio_two_page_resize_syncs_anchor_to_opposite_corner(self):
+        self.widget.set_selection_mode(SELECTION_TWO_PAGE)
+        self.widget.set_aspect_ratio(9 / 16)
+        self.widget.rect_p1 = QRect(20, 30, 180, 320)
+        self.widget.rect_p2 = QRect(600, 100, 120, 213)
+        self.widget._operation = "resize"
+        self.widget._active_rect_name = "rect_p1"
+        source_rect = QRect(0, 0, 150, 266)
+
+        other_rect = self.widget.rect_p2
+        anchor_expectations = {
+            HANDLE_TOP_LEFT: (other_rect.bottomRight(), "bottomRight"),
+            HANDLE_TOP_RIGHT: (other_rect.bottomLeft(), "bottomLeft"),
+            HANDLE_BOTTOM_LEFT: (other_rect.topRight(), "topRight"),
+            HANDLE_BOTTOM_RIGHT: (other_rect.topLeft(), "topLeft"),
+            HANDLE_LEFT: (QPoint(other_rect.right(), other_rect.center().y()), "right"),
+            HANDLE_RIGHT: (QPoint(other_rect.left(), other_rect.center().y()), "left"),
+            HANDLE_TOP: (QPoint(other_rect.center().x(), other_rect.bottom()), "bottom"),
+            HANDLE_BOTTOM: (QPoint(other_rect.center().x(), other_rect.top()), "top"),
+        }
+
+        for handle, (fixed_point, fixed_name) in anchor_expectations.items():
+            with self.subTest(handle=handle):
+                self.widget.rect_p2 = QRect(600, 100, 120, 213)
+                self.widget._active_handle = handle
+                self.widget._sync_other_rect_size(source_rect)
+                other_rect = self.widget.rect_p2
+                if fixed_name == "bottomRight":
+                    self.assertEqual(other_rect.bottomRight(), fixed_point)
+                elif fixed_name == "bottomLeft":
+                    self.assertEqual(other_rect.bottomLeft(), fixed_point)
+                elif fixed_name == "topRight":
+                    self.assertEqual(other_rect.topRight(), fixed_point)
+                elif fixed_name == "topLeft":
+                    self.assertEqual(other_rect.topLeft(), fixed_point)
+                elif fixed_name == "right":
+                    self.assertEqual(other_rect.right(), fixed_point.x())
+                    self.assertAlmostEqual(other_rect.center().y(), fixed_point.y(), delta=1)
+                elif fixed_name == "left":
+                    self.assertEqual(other_rect.left(), fixed_point.x())
+                    self.assertAlmostEqual(other_rect.center().y(), fixed_point.y(), delta=1)
+                elif fixed_name == "bottom":
+                    self.assertEqual(other_rect.bottom(), fixed_point.y())
+                    self.assertAlmostEqual(other_rect.center().x(), fixed_point.x(), delta=1)
+                elif fixed_name == "top":
+                    self.assertEqual(other_rect.top(), fixed_point.y())
+                    self.assertAlmostEqual(other_rect.center().x(), fixed_point.x(), delta=1)
+                self.assertEqual(other_rect.size(), source_rect.size())
+
+    def test_fixed_ratio_two_page_resize_preserves_other_rect_fixed_corner(self):
+        self.widget.set_selection_mode(SELECTION_TWO_PAGE)
+        self.widget.set_aspect_ratio(9 / 16)
+
+        self.widget.rect_p1 = QRect(20, 30, 180, 320)
+        self.widget.rect_p2 = QRect(600, 100, 120, 213)
+        self.widget._operation = "resize"
+        self.widget._active_rect_name = "rect_p1"
+        self.widget._active_handle = HANDLE_TOP_LEFT
+
+        self.widget._sync_other_rect_size(QRect(0, 0, 150, 266))
+
+        self.assertEqual(self.widget.rect_p2.bottomRight(), QPoint(719, 312))
+        self.assertEqual(self.widget.rect_p2.size(), QSize(150, 266))
 
     def test_free_two_page_resize_does_not_request_size_sync(self):
         self.widget.set_selection_mode(SELECTION_TWO_PAGE)
@@ -151,6 +273,17 @@ class SelectionLabelTest(unittest.TestCase):
                 point = self.widget._handle_rects(widget_rect)[handle].center()
                 self.widget._update_cursor(point)
                 self.assertEqual(self.widget.cursor().shape(), cursor_shape)
+
+    def test_fixed_ratio_side_handles_use_horizontal_cursors(self):
+        self.widget.resize(1000, 1200)
+        self.widget.set_aspect_ratio(9 / 16)
+        widget_rect = self.widget._image_to_widget_rect(self.widget.rect_p1)
+
+        for handle in (HANDLE_LEFT, HANDLE_RIGHT):
+            with self.subTest(handle=handle):
+                point = self.widget._handle_rects(widget_rect)[handle].center()
+                self.widget._update_cursor(point)
+                self.assertEqual(self.widget.cursor().shape(), Qt.SizeHorCursor)
 
 
 if __name__ == "__main__":
