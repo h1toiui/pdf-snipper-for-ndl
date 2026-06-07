@@ -124,8 +124,7 @@ class PDFSnipper(QMainWindow):
         self.file_list = QListWidget()
         self.file_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.file_list.model().rowsMoved.connect(self._renumber_file_list)
-        self.file_list.model().rowsMoved.connect(self.refresh_preview)
+        self.file_list.model().rowsMoved.connect(lambda *args: self._on_file_list_moved())
 
         layout = QVBoxLayout()
         layout.addWidget(self.btn_select)
@@ -274,19 +273,7 @@ class PDFSnipper(QMainWindow):
             self._update_preview_controls()
             return
 
-        # 全ファイルの総ページ数を計算
-        page_offsets = []  # [0, pages_in_file0, pages_in_file0 + pages_in_file1, ...]
-        total_pages = 0
-        for i in range(self.file_list.count()):
-            file_path = self.file_list.item(i).data(Qt.UserRole)
-            try:
-                with fitz.open(file_path) as doc:
-                    page_offsets.append(total_pages)
-                    total_pages += len(doc)
-            except Exception:
-                page_offsets.append(total_pages)
-        page_offsets.append(total_pages)
-
+        page_offsets, total_pages = self._collect_file_page_offsets()
         self._preview_total_page_count = total_pages
         if reset_page:
             self._preview_global_page_index = total_pages // 2
@@ -296,19 +283,36 @@ class PDFSnipper(QMainWindow):
             max(0, total_pages - 1),
         )
 
-        # グローバルページインデックスから、どのファイルの何ページ目かを確定
-        file_index = 0
-        local_page_index = self._preview_global_page_index
-        for i in range(self.file_list.count()):
-            file_start = page_offsets[i]
-            file_end = page_offsets[i + 1]
-            if file_start <= self._preview_global_page_index < file_end:
-                file_index = i
-                local_page_index = self._preview_global_page_index - file_start
-                break
-
-        # 対象ファイルを開き、そのページを表示
+        file_index, local_page_index = self._resolve_global_page(page_offsets, self._preview_global_page_index)
         file_path = self.file_list.item(file_index).data(Qt.UserRole)
+        if not self._load_preview_page(file_path, local_page_index):
+            self.canvas.clear()
+
+        self._update_preview_controls()
+
+    def _collect_file_page_offsets(self):
+        """全ファイルのページオフセットと総ページ数を返す。"""
+        offsets = [0]
+        total_pages = 0
+        for i in range(self.file_list.count()):
+            file_path = self.file_list.item(i).data(Qt.UserRole)
+            try:
+                with fitz.open(file_path) as doc:
+                    total_pages += len(doc)
+            except Exception:
+                pass
+            offsets.append(total_pages)
+        return offsets, total_pages
+
+    def _resolve_global_page(self, page_offsets, global_page_index):
+        """グローバルインデックスからファイルインデックスとローカルページインデックスを返す。"""
+        for i in range(len(page_offsets) - 1):
+            if page_offsets[i] <= global_page_index < page_offsets[i + 1]:
+                return i, global_page_index - page_offsets[i]
+        return max(0, len(page_offsets) - 2), 0
+
+    def _load_preview_page(self, file_path, local_page_index):
+        """指定ファイルのローカルページを読み込み、キャンバスに表示する。"""
         try:
             with fitz.open(file_path) as doc:
                 first_page = doc[0]
@@ -322,10 +326,9 @@ class PDFSnipper(QMainWindow):
                 pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csRGB)
                 image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
                 self.canvas.setPixmap(QPixmap.fromImage(image.copy()))
+            return True
         except Exception:
-            self.canvas.clear()
-
-        self._update_preview_controls()
+            return False
 
     def change_preview_page(self, offset):
         """複合PDFのグローバルページを前後へ移動する。"""
@@ -472,6 +475,10 @@ class PDFSnipper(QMainWindow):
         item = QListWidgetItem(display_text)
         item.setData(Qt.UserRole, file_path)
         self.file_list.addItem(item)
+
+    def _on_file_list_moved(self):
+        self._renumber_file_list()
+        self.refresh_preview(reset_page=False)
 
     def _renumber_file_list(self):
         """ファイルリストの項目番号を更新する。"""
