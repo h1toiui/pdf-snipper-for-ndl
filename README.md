@@ -51,6 +51,12 @@ python main.py
 7. OCRが必要なら `OCR` を有効にします。
 8. `実行` を押して保存先を選びます。
 
+## 補足
+
+- PDFは汎用的なファイル形式で、EPUBは電子書籍専用のファイル形式です。
+- PDFで出力した場合、一般的なリーダーでは上下スクロールまたは左から右のページ送りでの閲覧となります。縦書き書籍のPDFを右から左のページ送りで閲覧するには専用のアプリ（SideBooks; [Android](https://play.google.com/store/apps/details?id=jp.co.tokyo_ip.SideBooks) / [iOS](http://itunes.apple.com/jp/app/id409777225) など）の使用を併せておすすめします。
+- PDF, EPUBのどちらも[Send to Kindle](https://www.amazon.co.jp/sendtokindle)を使用することでKindleのクラウドにアップロードし、ログインしたそれぞれのデバイスで閲覧することができます。ただし現時点では、PDFは右から左のページ送りに対応していません。ページ送り方向を設定したEPUBはそのとおり閲覧できます。
+
 ## 注意
 
 - 著作権および国立国会図書館など他サービスの利用規約を遵守してください。
