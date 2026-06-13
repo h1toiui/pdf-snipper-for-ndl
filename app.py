@@ -130,7 +130,7 @@ class PDFSnipper(QMainWindow):
         layout.addWidget(self.btn_select)
         layout.addWidget(self.btn_remove)
         layout.addWidget(self.file_list)
-        return self._group_box("1. インポート（ドラッグで並び替え）", layout)
+        return self._group_box("インポート（ドラッグで並び替え）", layout)
 
     def _build_crop_group(self):
         """スキャン種別と切り抜き範囲指定用のUIグループを作る。"""
@@ -157,7 +157,7 @@ class PDFSnipper(QMainWindow):
         layout.addWidget(self.radio_mode_two_page)
         layout.addWidget(QLabel("アスペクト比:"))
         layout.addWidget(self.aspect_ratio_combo)
-        return self._group_box("2. 切り抜き範囲指定", layout)
+        return self._group_box("切り抜き範囲指定", layout)
 
     def _build_output_group(self):
         """色、圧縮、形式、OCR、書誌情報の出力オプションを作る。"""
@@ -216,7 +216,7 @@ class PDFSnipper(QMainWindow):
         ):
             layout.addWidget(widget)
 
-        return self._group_box("3. 出力オプション", layout)
+        return self._group_box("出力オプション", layout)
 
     def _build_execution_group(self):
         """実行ボタン、進捗バー、状態メッセージのUIグループを作る。"""
@@ -244,7 +244,7 @@ class PDFSnipper(QMainWindow):
         layout.addWidget(self.btn_run)
         layout.addWidget(self.progress)
         layout.addWidget(self.status_log)
-        return self._group_box("4. 実行", layout)
+        return self._group_box("実行", layout)
 
     def select_files(self):
         """ファイルダイアログで選ばれたPDFを一覧へ追加する。"""
@@ -386,8 +386,6 @@ class PDFSnipper(QMainWindow):
             result = process_documents(options, self._update_file_progress)
             self._set_progress_value(result.page_count, result.page_count)
             message = f"保存完了:\n{result.output_path}"
-            if result.ocr_embedded:
-                message += "\n\nOCRテキストを埋め込みました"
             self.status_log.setText(f"完了: {result.file_size_mb:.2f} MB")
             QMessageBox.information(self, "完了", message)
         except Exception as e:
