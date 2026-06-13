@@ -31,6 +31,7 @@ Python 3.12で動作確認しています。
 # Mac
 cd pdf-snipper-for-ndl
 python3 -m venv .venv
+<<<<<<< HEAD
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
@@ -43,6 +44,9 @@ py -m venv .venv
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
+=======
+source .venv/bin/activate  # Windowsの場合: .venv/Scripts/Activate.ps1
+>>>>>>> b2eeab155501a50b6bb6c767d45f8615e07ddc45
 pip install -r requirements.txt
 ```
 
