@@ -30,7 +30,7 @@ Python 3.12で動作確認しています。
 ```bash
 cd pdf-snipper-for-ndl
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # Windowsの場合: .venv/Scripts/Activate.ps1
 pip install -r requirements.txt
 ```
 
