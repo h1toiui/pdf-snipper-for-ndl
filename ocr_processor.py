@@ -194,7 +194,7 @@ def _join_ocr_lines(lines):
     """同一contentsブロック内のOCR行を段落テキストとして詰める。"""
     joined = ""
     for line in lines:
-        line = _normalize_ocr_line(line)
+        # line = _normalize_ocr_line(line)
         if not line:
             continue
         if joined and _needs_space_between(joined[-1], line[0]):
