@@ -6,7 +6,6 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
-
 TEXT_KEYS = {"text", "content", "contents", "string", "value"}
 
 
@@ -107,7 +106,12 @@ def _page_from_json(path):
     page = _page_from_ndlocr_json(data)
     if page.text or page.lines:
         return page
-    return OCRPage(lines=[], image_width=0, image_height=0, text=_fallback_text_from_json_data(data))
+    return OCRPage(
+        lines=[],
+        image_width=0,
+        image_height=0,
+        text=_fallback_text_from_json_data(data),
+    )
 
 
 def _page_from_ndlocr_json(data):
@@ -218,7 +222,9 @@ def _collect_json_strings(value, values):
     if isinstance(value, dict):
         for key, item in value.items():
             normalized_key = key.lower()
-            is_text_key = normalized_key in TEXT_KEYS or normalized_key.endswith("_text")
+            is_text_key = normalized_key in TEXT_KEYS or normalized_key.endswith(
+                "_text"
+            )
             if isinstance(item, str) and is_text_key:
                 text = item.strip()
                 if text:

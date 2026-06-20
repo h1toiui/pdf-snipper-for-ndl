@@ -132,7 +132,9 @@ class SelectionLabelTest(unittest.TestCase):
                     if handle in (HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT)
                     else original.y() + 128
                 )
-                result = self.widget._fixed_ratio_resized_rect(QPoint(original.x(), target_y))
+                result = self.widget._fixed_ratio_resized_rect(
+                    QPoint(original.x(), target_y)
+                )
                 if fixed_name == "bottomRight":
                     self.assertEqual(result.bottomRight(), fixed_point)
                 elif fixed_name == "bottomLeft":
@@ -141,7 +143,9 @@ class SelectionLabelTest(unittest.TestCase):
                     self.assertEqual(result.topRight(), fixed_point)
                 else:
                     self.assertEqual(result.topLeft(), fixed_point)
-                self.assertAlmostEqual(result.width() / result.height(), 9 / 16, places=2)
+                self.assertAlmostEqual(
+                    result.width() / result.height(), 9 / 16, places=2
+                )
 
     def test_fixed_ratio_side_handles_fix_horizontal_anchor(self):
         self.widget.set_aspect_ratio(9 / 16)
@@ -153,7 +157,11 @@ class SelectionLabelTest(unittest.TestCase):
             with self.subTest(handle=handle):
                 self.widget._active_handle = handle
                 target = QPoint(
-                    original.left() - 20 if handle == HANDLE_LEFT else original.right() + 20,
+                    (
+                        original.left() - 20
+                        if handle == HANDLE_LEFT
+                        else original.right() + 20
+                    ),
                     original.center().y(),
                 )
                 result = self.widget._fixed_ratio_resized_rect(target)
@@ -161,7 +169,9 @@ class SelectionLabelTest(unittest.TestCase):
                     self.assertEqual(result.right(), original.right())
                 else:
                     self.assertEqual(result.left(), original.left())
-                self.assertAlmostEqual(result.width() / result.height(), 9 / 16, places=2)
+                self.assertAlmostEqual(
+                    result.width() / result.height(), 9 / 16, places=2
+                )
 
     def test_fixed_ratio_two_page_resize_syncs_both_directions(self):
         self.widget.set_selection_mode(SELECTION_TWO_PAGE)
@@ -203,7 +213,10 @@ class SelectionLabelTest(unittest.TestCase):
             HANDLE_BOTTOM_RIGHT: (other_rect.topLeft(), "topLeft"),
             HANDLE_LEFT: (QPoint(other_rect.right(), other_rect.center().y()), "right"),
             HANDLE_RIGHT: (QPoint(other_rect.left(), other_rect.center().y()), "left"),
-            HANDLE_TOP: (QPoint(other_rect.center().x(), other_rect.bottom()), "bottom"),
+            HANDLE_TOP: (
+                QPoint(other_rect.center().x(), other_rect.bottom()),
+                "bottom",
+            ),
             HANDLE_BOTTOM: (QPoint(other_rect.center().x(), other_rect.top()), "top"),
         }
 
@@ -223,16 +236,24 @@ class SelectionLabelTest(unittest.TestCase):
                     self.assertEqual(other_rect.topLeft(), fixed_point)
                 elif fixed_name == "right":
                     self.assertEqual(other_rect.right(), fixed_point.x())
-                    self.assertAlmostEqual(other_rect.center().y(), fixed_point.y(), delta=1)
+                    self.assertAlmostEqual(
+                        other_rect.center().y(), fixed_point.y(), delta=1
+                    )
                 elif fixed_name == "left":
                     self.assertEqual(other_rect.left(), fixed_point.x())
-                    self.assertAlmostEqual(other_rect.center().y(), fixed_point.y(), delta=1)
+                    self.assertAlmostEqual(
+                        other_rect.center().y(), fixed_point.y(), delta=1
+                    )
                 elif fixed_name == "bottom":
                     self.assertEqual(other_rect.bottom(), fixed_point.y())
-                    self.assertAlmostEqual(other_rect.center().x(), fixed_point.x(), delta=1)
+                    self.assertAlmostEqual(
+                        other_rect.center().x(), fixed_point.x(), delta=1
+                    )
                 elif fixed_name == "top":
                     self.assertEqual(other_rect.top(), fixed_point.y())
-                    self.assertAlmostEqual(other_rect.center().x(), fixed_point.x(), delta=1)
+                    self.assertAlmostEqual(
+                        other_rect.center().x(), fixed_point.x(), delta=1
+                    )
                 self.assertEqual(other_rect.size(), source_rect.size())
 
     def test_fixed_ratio_two_page_resize_preserves_other_rect_fixed_corner(self):
@@ -291,14 +312,22 @@ class SelectionLabelTest(unittest.TestCase):
         self.widget._drag_start_rect = original
 
         self.widget._active_handle = HANDLE_LEFT
-        result_left = self.widget._fixed_ratio_resized_rect(QPoint(60, original.center().y()))
+        result_left = self.widget._fixed_ratio_resized_rect(
+            QPoint(60, original.center().y())
+        )
         self.assertEqual(result_left.left(), 60)
-        self.assertAlmostEqual(result_left.width() / result_left.height(), 9 / 16, places=2)
+        self.assertAlmostEqual(
+            result_left.width() / result_left.height(), 9 / 16, places=2
+        )
 
         self.widget._active_handle = HANDLE_RIGHT
-        result_right = self.widget._fixed_ratio_resized_rect(QPoint(290, original.center().y()))
+        result_right = self.widget._fixed_ratio_resized_rect(
+            QPoint(290, original.center().y())
+        )
         self.assertEqual(result_right.right(), 290)
-        self.assertAlmostEqual(result_right.width() / result_right.height(), 9 / 16, places=2)
+        self.assertAlmostEqual(
+            result_right.width() / result_right.height(), 9 / 16, places=2
+        )
 
 
 if __name__ == "__main__":

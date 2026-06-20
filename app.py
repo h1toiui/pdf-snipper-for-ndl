@@ -77,14 +77,12 @@ class PDFSnipper(QMainWindow):
         self.btn_preview_previous.setAutoRepeatDelay(300)
         self.btn_preview_previous.setAutoRepeatInterval(120)
         self.btn_preview_previous.clicked.connect(lambda: self.change_preview_page(-1))
-        self.btn_preview_previous.setStyleSheet(
-            """
+        self.btn_preview_previous.setStyleSheet("""
             QPushButton {
                 background-color: #D8D8D8;
                 color: black;
             }
-            """
-        )
+            """)
         self.preview_page_label = QLabel("0 / 0")
         self.preview_page_label.setAlignment(Qt.AlignCenter)
 
@@ -92,14 +90,12 @@ class PDFSnipper(QMainWindow):
         self.btn_preview_next.setFixedSize(40, 20)
         self.btn_preview_next.setAutoRepeat(True)
         self.btn_preview_next.setAutoRepeatDelay(300)
-        self.btn_preview_next.setStyleSheet(
-            """
+        self.btn_preview_next.setStyleSheet("""
             QPushButton {
                 background-color: #D8D8D8;
                 color: black;
             }
-            """
-        )
+            """)
         self.btn_preview_next.setAutoRepeatInterval(120)
         self.btn_preview_next.clicked.connect(lambda: self.change_preview_page(1))
 
@@ -141,7 +137,9 @@ class PDFSnipper(QMainWindow):
         self.file_list = QListWidget()
         self.file_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.file_list.model().rowsMoved.connect(lambda *args: self._on_file_list_moved())
+        self.file_list.model().rowsMoved.connect(
+            lambda *args: self._on_file_list_moved()
+        )
 
         layout = QVBoxLayout()
         layout.addWidget(self.btn_select)
@@ -192,7 +190,9 @@ class PDFSnipper(QMainWindow):
         self.radio_std = QRadioButton("標準圧縮（96dpi）")
         self.radio_high = QRadioButton("高圧縮（48dpi）")
         self.radio_std.setChecked(True)
-        self.comp_group = self._button_group(self.radio_none, self.radio_std, self.radio_high)
+        self.comp_group = self._button_group(
+            self.radio_none, self.radio_std, self.radio_high
+        )
 
         self.radio_pdf = QRadioButton("PDF")
         self.radio_epub_ltr = QRadioButton("EPUB（左綴じ）")
@@ -206,10 +206,14 @@ class PDFSnipper(QMainWindow):
         self.check_ocr = QCheckBox("OCR（処理に時間がかかります）")
 
         self.filename_input = QLineEdit()
-        self.filename_input.textEdited.connect(lambda: setattr(self, "_title_was_edited", True))
+        self.filename_input.textEdited.connect(
+            lambda: setattr(self, "_title_was_edited", True)
+        )
 
         self.author_input = QLineEdit()
-        self.author_input.textEdited.connect(lambda: setattr(self, "_author_was_edited", True))
+        self.author_input.textEdited.connect(
+            lambda: setattr(self, "_author_was_edited", True)
+        )
 
         layout = QVBoxLayout()
         for widget in (
@@ -239,8 +243,7 @@ class PDFSnipper(QMainWindow):
         """実行ボタン、進捗バー、状態メッセージのUIグループを作る。"""
         self.btn_run = QPushButton("実行")
         self.btn_run.setFixedHeight(50)
-        self.btn_run.setStyleSheet(
-            """
+        self.btn_run.setStyleSheet("""
             QPushButton {
                 background-color: #007AFF;
                 color: white;
@@ -249,8 +252,7 @@ class PDFSnipper(QMainWindow):
                 background-color: #b8b8b8;
                 color: #f2f2f2;
             }
-            """
-        )
+            """)
         self.btn_run.clicked.connect(self.process_pdf)
 
         self.progress = QProgressBar()
@@ -265,7 +267,9 @@ class PDFSnipper(QMainWindow):
 
     def select_files(self):
         """ファイルダイアログで選ばれたPDFを一覧へ追加する。"""
-        files, _ = QFileDialog.getOpenFileNames(self, "PDFを選択", "", "PDF Files (*.pdf)")
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "PDFを選択", "", "PDF Files (*.pdf)"
+        )
         is_first_add = self.file_list.count() == 0
         for file_path in sorted(files):
             self._add_file(file_path)
@@ -300,7 +304,9 @@ class PDFSnipper(QMainWindow):
             max(0, total_pages - 1),
         )
 
-        file_index, local_page_index = self._resolve_global_page(page_offsets, self._preview_global_page_index)
+        file_index, local_page_index = self._resolve_global_page(
+            page_offsets, self._preview_global_page_index
+        )
         file_path = self.file_list.item(file_index).data(Qt.UserRole)
         if not self._load_preview_page(file_path, local_page_index):
             self.canvas.clear()
@@ -340,8 +346,12 @@ class PDFSnipper(QMainWindow):
                     self.canvas.set_aspect_ratio(self.canvas.source_aspect_ratio)
 
                 page = doc[local_page_index]
-                pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csRGB)
-                image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
+                pix = page.get_pixmap(
+                    matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csRGB
+                )
+                image = QImage(
+                    pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888
+                )
                 self.canvas.setPixmap(QPixmap.fromImage(image.copy()))
             return True
         except Exception:
@@ -364,7 +374,11 @@ class PDFSnipper(QMainWindow):
         """見開き・2P設定を選択ウィジェットへ反映する。"""
         if not checked:
             return
-        mode = SELECTION_SPREAD if self.radio_mode_spread.isChecked() else SELECTION_TWO_PAGE
+        mode = (
+            SELECTION_SPREAD
+            if self.radio_mode_spread.isChecked()
+            else SELECTION_TWO_PAGE
+        )
         self.canvas.set_selection_mode(mode)
 
     def update_aspect_ratio(self, index=None):
@@ -383,9 +397,12 @@ class PDFSnipper(QMainWindow):
         has_pages = self._preview_total_page_count > 0
         current = self._preview_global_page_index + 1 if has_pages else 0
         self.preview_page_label.setText(f"{current} / {self._preview_total_page_count}")
-        self.btn_preview_previous.setEnabled(has_pages and self._preview_global_page_index > 0)
+        self.btn_preview_previous.setEnabled(
+            has_pages and self._preview_global_page_index > 0
+        )
         self.btn_preview_next.setEnabled(
-            has_pages and self._preview_global_page_index < self._preview_total_page_count - 1
+            has_pages
+            and self._preview_global_page_index < self._preview_total_page_count - 1
         )
 
     def process_pdf(self):
@@ -396,7 +413,7 @@ class PDFSnipper(QMainWindow):
         save_dir = QFileDialog.getExistingDirectory(self, "保存先フォルダを選択")
         if not save_dir:
             return
-            
+
         output_path = self._build_processing_options(save_dir).output_path
         output_title = self._build_processing_options(save_dir).output_title
         if os.path.exists(output_path):
@@ -480,7 +497,10 @@ class PDFSnipper(QMainWindow):
 
     def _file_paths(self):
         """一覧に並んでいるPDFパスを表示順で返す。"""
-        return [self.file_list.item(i).data(Qt.UserRole) for i in range(self.file_list.count())]
+        return [
+            self.file_list.item(i).data(Qt.UserRole)
+            for i in range(self.file_list.count())
+        ]
 
     def _ocr_command(self):
         """環境変数、ローカルvenv、PATHの順にNDLOCR-Liteコマンドを探す。"""

@@ -12,7 +12,9 @@ def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
     mod_time = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
     safe_title = escape(title)
     safe_author = escape(author.strip())
-    creator_meta = f"\n    <dc:creator>{safe_author}</dc:creator>" if safe_author else ""
+    creator_meta = (
+        f"\n    <dc:creator>{safe_author}</dc:creator>" if safe_author else ""
+    )
     ocr_pages = ocr_pages or []
 
     with zipfile.ZipFile(path, "w") as zf:
@@ -57,7 +59,7 @@ def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
         nav = _nav_xhtml(safe_title)
         zf.writestr("OEBPS/nav.xhtml", nav)
 
-        opf = f'''<?xml version="1.0" encoding="UTF-8"?>
+        opf = f"""<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" version="3.0" prefix="rendition: http://www.idpf.org/vocab/rendition/#">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="pub-id">{pub_id}</dc:identifier>
@@ -76,10 +78,10 @@ def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
   <spine toc="toc" page-progression-direction="{direction}">
     {''.join(spine_items)}
   </spine>
-</package>'''
+</package>"""
         zf.writestr("OEBPS/content.opf", opf)
 
-        ncx = f'''<?xml version="1.0" encoding="UTF-8"?>
+        ncx = f"""<?xml version="1.0" encoding="UTF-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
   <head>
     <meta name="dtb:uid" content="{pub_id}"/>
@@ -94,7 +96,7 @@ def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
       <content src="Text/page_0000.xhtml"/>
     </navPoint>
   </navMap>
-</ncx>'''
+</ncx>"""
         zf.writestr("OEBPS/toc.ncx", ncx)
 
 
@@ -107,7 +109,7 @@ def _image_size(image_data):
 def _page_xhtml(index, img_name, width, height, ocr_page=None):
     """1ページ分の画像とOCRレイヤーを含むXHTMLを作る。"""
     ocr_layer = _ocr_layer_xhtml(ocr_page, width, height)
-    return f'''<?xml version="1.0" encoding="UTF-8"?>
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -165,7 +167,7 @@ def _page_xhtml(index, img_name, width, height, ocr_page=None):
   </svg>
   {ocr_layer}
 </body>
-</html>'''
+</html>"""
 
 
 def _ocr_layer_xhtml(ocr_page, width, height):
@@ -178,7 +180,7 @@ def _ocr_layer_xhtml(ocr_page, width, height):
         return (
             '<div class="ocr-layer">'
             f'<span class="ocr-line" style="left:0; top:0; width:1px; height:1px; font-size:1px;">'
-            f'{escape(ocr_page.text)}</span></div>'
+            f"{escape(ocr_page.text)}</span></div>"
         )
 
     scale_x = width / max(1, ocr_page.image_width)
@@ -194,7 +196,7 @@ def _ocr_layer_xhtml(ocr_page, width, height):
         spans.append(
             f'<span class="{class_name}" style="left:{x:.2f}px; top:{y:.2f}px; '
             f'width:{w:.2f}px; height:{h:.2f}px; font-size:{font_size:.2f}px;">'
-            f'{escape(line.text)}</span>'
+            f"{escape(line.text)}</span>"
         )
 
     return f'<div class="ocr-layer">{"".join(spans)}</div>'
@@ -202,7 +204,7 @@ def _ocr_layer_xhtml(ocr_page, width, height):
 
 def _nav_xhtml(title):
     """EPUB 3用の最小限のナビゲーションXHTMLを作る。"""
-    return f'''<?xml version="1.0" encoding="UTF-8"?>
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml"
       xmlns:epub="http://www.idpf.org/2007/ops">
@@ -217,4 +219,4 @@ def _nav_xhtml(title):
     </ol>
   </nav>
 </body>
-</html>'''
+</html>"""

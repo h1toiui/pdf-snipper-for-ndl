@@ -2,7 +2,6 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QCursor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QLabel
 
-
 SELECTION_SPREAD = "spread"
 SELECTION_TWO_PAGE = "two_page"
 
@@ -189,7 +188,9 @@ class SelectionLabel(QLabel):
             return
 
         painter.drawPixmap(self._display_rect(), self._pixmap)
-        self._draw_selection(painter, self.rect_p1, QColor("#e00000"), self._page1_label())
+        self._draw_selection(
+            painter, self.rect_p1, QColor("#e00000"), self._page1_label()
+        )
         if self.selection_mode == SELECTION_TWO_PAGE:
             self._draw_selection(painter, self.rect_p2, QColor("#0057d9"), "Page 2")
 
@@ -253,7 +254,11 @@ class SelectionLabel(QLabel):
             x1 = max(x, x0 + MIN_SELECTION_SIZE)
         if self._active_handle in (HANDLE_TOP, HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT):
             y0 = min(y, y1 - MIN_SELECTION_SIZE)
-        if self._active_handle in (HANDLE_BOTTOM, HANDLE_BOTTOM_LEFT, HANDLE_BOTTOM_RIGHT):
+        if self._active_handle in (
+            HANDLE_BOTTOM,
+            HANDLE_BOTTOM_LEFT,
+            HANDLE_BOTTOM_RIGHT,
+        ):
             y1 = max(y, y0 + MIN_SELECTION_SIZE)
 
         return self._rect_from_bounds(
@@ -278,7 +283,9 @@ class SelectionLabel(QLabel):
             new_y1 = center_y + height / 2
         elif self._active_handle == HANDLE_RIGHT:
             fixed_x = x0
-            new_x1 = max(min(image_pos.x(), self.image_width()), x0 + MIN_SELECTION_SIZE)
+            new_x1 = max(
+                min(image_pos.x(), self.image_width()), x0 + MIN_SELECTION_SIZE
+            )
             width = max(MIN_SELECTION_SIZE, new_x1 - fixed_x)
             height = width / ratio
             new_x0 = fixed_x
@@ -327,7 +334,9 @@ class SelectionLabel(QLabel):
                 new_x1 = center_x + width / 2
         else:
             delta_y = image_pos.y() - self._drag_start.y()
-            height = max(MIN_SELECTION_SIZE, self._drag_start_rect.height() + delta_y * 2)
+            height = max(
+                MIN_SELECTION_SIZE, self._drag_start_rect.height() + delta_y * 2
+            )
             center_y = (y0 + y1) / 2
             new_y0 = center_y - height / 2
             new_y1 = center_y + height / 2
@@ -451,14 +460,22 @@ class SelectionLabel(QLabel):
 
         if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT, HANDLE_LEFT):
             x = fixed_x - width + 1
-        elif self._active_handle in (HANDLE_TOP_RIGHT, HANDLE_BOTTOM_RIGHT, HANDLE_RIGHT):
+        elif self._active_handle in (
+            HANDLE_TOP_RIGHT,
+            HANDLE_BOTTOM_RIGHT,
+            HANDLE_RIGHT,
+        ):
             x = fixed_x
         else:
             x = round(fixed_x - width / 2)
 
         if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT, HANDLE_TOP):
             y = fixed_y - height + 1
-        elif self._active_handle in (HANDLE_BOTTOM_LEFT, HANDLE_BOTTOM_RIGHT, HANDLE_BOTTOM):
+        elif self._active_handle in (
+            HANDLE_BOTTOM_LEFT,
+            HANDLE_BOTTOM_RIGHT,
+            HANDLE_BOTTOM,
+        ):
             y = fixed_y
         else:
             y = round(fixed_y - height / 2)
@@ -470,14 +487,22 @@ class SelectionLabel(QLabel):
     def _sync_other_rect_fixed_point(self, rect):
         if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT, HANDLE_LEFT):
             fixed_x = rect.right()
-        elif self._active_handle in (HANDLE_TOP_RIGHT, HANDLE_BOTTOM_RIGHT, HANDLE_RIGHT):
+        elif self._active_handle in (
+            HANDLE_TOP_RIGHT,
+            HANDLE_BOTTOM_RIGHT,
+            HANDLE_RIGHT,
+        ):
             fixed_x = rect.left()
         else:
             fixed_x = rect.center().x()
 
         if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT, HANDLE_TOP):
             fixed_y = rect.bottom()
-        elif self._active_handle in (HANDLE_BOTTOM_LEFT, HANDLE_BOTTOM_RIGHT, HANDLE_BOTTOM):
+        elif self._active_handle in (
+            HANDLE_BOTTOM_LEFT,
+            HANDLE_BOTTOM_RIGHT,
+            HANDLE_BOTTOM,
+        ):
             fixed_y = rect.top()
         else:
             fixed_y = rect.center().y()
@@ -529,8 +554,12 @@ class SelectionLabel(QLabel):
         if not clamp and not display_rect.contains(pos):
             return None
 
-        x = round((pos.x() - display_rect.x()) * self._pixmap.width() / display_rect.width())
-        y = round((pos.y() - display_rect.y()) * self._pixmap.height() / display_rect.height())
+        x = round(
+            (pos.x() - display_rect.x()) * self._pixmap.width() / display_rect.width()
+        )
+        y = round(
+            (pos.y() - display_rect.y()) * self._pixmap.height() / display_rect.height()
+        )
         x = min(max(0, x), self._pixmap.width())
         y = min(max(0, y), self._pixmap.height())
         return QPoint(x, y)
@@ -538,8 +567,12 @@ class SelectionLabel(QLabel):
     def _image_to_widget_rect(self, rect):
         """プレビュー画像の元座標矩形をウィジェット座標へ変換する。"""
         display_rect = self._display_rect()
-        x = round(display_rect.x() + rect.x() * display_rect.width() / self.image_width())
-        y = round(display_rect.y() + rect.y() * display_rect.height() / self.image_height())
+        x = round(
+            display_rect.x() + rect.x() * display_rect.width() / self.image_width()
+        )
+        y = round(
+            display_rect.y() + rect.y() * display_rect.height() / self.image_height()
+        )
         width = round(rect.width() * display_rect.width() / self.image_width())
         height = round(rect.height() * display_rect.height() / self.image_height())
         return QRect(x, y, width, height)

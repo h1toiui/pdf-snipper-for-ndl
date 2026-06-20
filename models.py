@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QRect
 
-
 OUTPUT_PDF = "pdf"
 OUTPUT_EPUB = "epub"
 
