@@ -72,17 +72,34 @@ class PDFSnipper(QMainWindow):
         self.canvas.setStyleSheet("border: 2px solid #ccc; background-color: #eee;")
 
         self.btn_preview_previous = QPushButton("前へ")
-        self.btn_preview_previous.setFixedSize(40, 24)
+        self.btn_preview_previous.setFixedSize(40, 20)
         self.btn_preview_previous.setAutoRepeat(True)
         self.btn_preview_previous.setAutoRepeatDelay(300)
         self.btn_preview_previous.setAutoRepeatInterval(120)
         self.btn_preview_previous.clicked.connect(lambda: self.change_preview_page(-1))
+        self.btn_preview_previous.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #D8D8D8;
+                color: black;
+            }
+            """
+        )
         self.preview_page_label = QLabel("0 / 0")
         self.preview_page_label.setAlignment(Qt.AlignCenter)
+
         self.btn_preview_next = QPushButton("次へ")
-        self.btn_preview_next.setFixedSize(40, 24)
+        self.btn_preview_next.setFixedSize(40, 20)
         self.btn_preview_next.setAutoRepeat(True)
         self.btn_preview_next.setAutoRepeatDelay(300)
+        self.btn_preview_next.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #D8D8D8;
+                color: black;
+            }
+            """
+        )
         self.btn_preview_next.setAutoRepeatInterval(120)
         self.btn_preview_next.clicked.connect(lambda: self.change_preview_page(1))
 
@@ -379,6 +396,19 @@ class PDFSnipper(QMainWindow):
         save_dir = QFileDialog.getExistingDirectory(self, "保存先フォルダを選択")
         if not save_dir:
             return
+            
+        output_path = self._build_processing_options(save_dir).output_path
+        output_title = self._build_processing_options(save_dir).output_title
+        if os.path.exists(output_path):
+            reply = QMessageBox.question(
+                self,
+                "上書きの確認",
+                f"{output_title} はすでに存在しています。\n上書きしますか？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
 
         self._set_processing_state(True)
         try:
