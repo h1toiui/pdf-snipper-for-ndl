@@ -190,7 +190,10 @@ class SelectionLabelTest(unittest.TestCase):
                 source_rect = QRect(0, 0, 120, 213)
 
                 original_other = getattr(self.widget, other_name)
-                self.widget._sync_other_rect_size(source_rect)
+                self.widget._sync_other_rect_size(
+                    source_rect.width(),
+                    source_rect.height(),
+                )
 
                 other_rect = getattr(self.widget, other_name)
                 self.assertEqual(other_rect.size(), source_rect.size())
@@ -224,7 +227,10 @@ class SelectionLabelTest(unittest.TestCase):
             with self.subTest(handle=handle):
                 self.widget.rect_p2 = QRect(600, 100, 120, 213)
                 self.widget._active_handle = handle
-                self.widget._sync_other_rect_size(source_rect)
+                self.widget._sync_other_rect_size(
+                    source_rect.width(),
+                    source_rect.height(),
+                )
                 other_rect = self.widget.rect_p2
                 if fixed_name == "bottomRight":
                     self.assertEqual(other_rect.bottomRight(), fixed_point)
@@ -266,7 +272,7 @@ class SelectionLabelTest(unittest.TestCase):
         self.widget._active_rect_name = "rect_p1"
         self.widget._active_handle = HANDLE_TOP_LEFT
 
-        self.widget._sync_other_rect_size(QRect(0, 0, 150, 266))
+        self.widget._sync_other_rect_size(150, 266)
 
         self.assertEqual(self.widget.rect_p2.bottomRight(), QPoint(719, 312))
         self.assertEqual(self.widget.rect_p2.size(), QSize(150, 266))
@@ -324,10 +330,76 @@ class SelectionLabelTest(unittest.TestCase):
         result_right = self.widget._fixed_ratio_resized_rect(
             QPoint(290, original.center().y())
         )
-        self.assertEqual(result_right.right(), 290)
+        self.assertEqual(result_right.x() + result_right.width(), 290)
         self.assertAlmostEqual(
             result_right.width() / result_right.height(), 9 / 16, places=2
         )
+
+    def test_fixed_ratio_side_resize_stops_at_image_edge(self):
+        self.widget.set_aspect_ratio(9 / 16)
+        original = QRect(100, 100, 160, 284)
+        self.widget._drag_start_rect = original
+        self.widget._active_handle = HANDLE_RIGHT
+
+        result = self.widget._fixed_ratio_resized_rect(
+            QPoint(self.widget.image_width() + 300, original.center().y())
+        )
+
+        self.assertEqual(result.left(), original.left())
+        self.assertGreaterEqual(result.top(), 0)
+        self.assertLessEqual(result.x() + result.width(), self.widget.image_width())
+        self.assertLessEqual(result.y() + result.height(), self.widget.image_height())
+
+    def test_fixed_ratio_side_sync_uses_same_anchor_logic_as_active_rect(self):
+        self.widget.set_selection_mode(SELECTION_TWO_PAGE)
+        self.widget.set_aspect_ratio(9 / 16)
+        self.widget.rect_p1 = QRect(100, 100, 160, 284)
+        self.widget.rect_p2 = QRect(600, 120, 160, 284)
+        self.widget._drag_start_rect = QRect(self.widget.rect_p1)
+        self.widget._operation = "resize"
+        self.widget._active_rect_name = "rect_p1"
+        self.widget._active_handle = HANDLE_LEFT
+
+        active_rect = self.widget._fixed_ratio_resized_rect(
+            QPoint(40, self.widget.rect_p1.center().y())
+        )
+        original_other = QRect(self.widget.rect_p2)
+
+        self.widget._sync_other_rect_size(active_rect.width(), active_rect.height())
+
+        self.assertEqual(self.widget.rect_p2.size(), active_rect.size())
+        self.assertEqual(self.widget.rect_p2.right(), original_other.right())
+        self.assertAlmostEqual(
+            self.widget.rect_p2.center().y(),
+            original_other.center().y(),
+            delta=1,
+        )
+
+    def test_synced_fixed_ratio_resize_stops_at_smaller_limit(self):
+        self.widget.set_selection_mode(SELECTION_TWO_PAGE)
+        self.widget.set_aspect_ratio(9 / 16)
+        self.widget.rect_p1 = QRect(100, 100, 160, 284)
+        self.widget.rect_p2 = QRect(760, 120, 160, 284)
+        self.widget._drag_start_rect = QRect(self.widget.rect_p1)
+        self.widget._operation = "resize"
+        self.widget._active_rect_name = "rect_p1"
+        self.widget._active_handle = HANDLE_LEFT
+
+        self.widget._apply_synced_fixed_ratio_resize(
+            QPoint(-300, self.widget.rect_p1.center().y())
+        )
+
+        self.assertEqual(
+            self.widget.rect_p1.x() + self.widget.rect_p1.width(),
+            260,
+        )
+        self.assertEqual(
+            self.widget.rect_p2.x() + self.widget.rect_p2.width(),
+            920,
+        )
+        self.assertEqual(self.widget.rect_p1.size(), self.widget.rect_p2.size())
+        self.assertGreaterEqual(self.widget.rect_p1.left(), 0)
+        self.assertGreaterEqual(self.widget.rect_p2.left(), 0)
 
 
 if __name__ == "__main__":

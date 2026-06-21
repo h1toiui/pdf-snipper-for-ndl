@@ -17,6 +17,11 @@ HANDLE_BOTTOM_RIGHT = "bottom_right"
 HANDLE_SIZE = 10
 MIN_SELECTION_SIZE = 12
 
+LEFT_HANDLES = {HANDLE_LEFT, HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT}
+RIGHT_HANDLES = {HANDLE_RIGHT, HANDLE_TOP_RIGHT, HANDLE_BOTTOM_RIGHT}
+TOP_HANDLES = {HANDLE_TOP, HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT}
+BOTTOM_HANDLES = {HANDLE_BOTTOM, HANDLE_BOTTOM_LEFT, HANDLE_BOTTOM_RIGHT}
+
 
 class SelectionLabel(QLabel):
     """画像上で移動・リサイズ可能な切り抜き矩形を管理する。"""
@@ -133,20 +138,21 @@ class SelectionLabel(QLabel):
             self._reset_operation()
             return
 
-        image_pos = self._widget_to_image_pos(event.pos(), clamp=True)
+        image_pos = self._widget_to_image_pos(event.pos(), allow_outside=True)
         if image_pos is None:
             return
 
         if self._operation == "move":
             rect = self._moved_rect(image_pos)
+            self._set_rect_by_name(self._active_rect_name, rect)
         elif self.aspect_ratio is None:
             rect = self._freely_resized_rect(image_pos)
+            self._set_rect_by_name(self._active_rect_name, rect)
+        elif self._should_sync_two_page_size():
+            self._apply_synced_fixed_ratio_resize(image_pos)
         else:
             rect = self._fixed_ratio_resized_rect(image_pos)
-
-        self._set_rect_by_name(self._active_rect_name, rect)
-        if self._should_sync_two_page_size():
-            self._sync_other_rect_size(rect)
+            self._set_rect_by_name(self._active_rect_name, rect)
         self.update()
 
     def mouseReleaseEvent(self, event):
@@ -269,113 +275,57 @@ class SelectionLabel(QLabel):
         )
 
     def _fixed_ratio_resized_rect(self, image_pos):
+        width, height = self._fixed_ratio_size_from_drag(image_pos)
+        width, height = self._bounded_fixed_ratio_size(
+            width,
+            height,
+            self._drag_start_rect,
+        )
+        return self._anchored_rect_from_reference(
+            self._drag_start_rect,
+            width,
+            height,
+            self._active_handle,
+        )
+
+    def _fixed_ratio_size_from_drag(self, image_pos):
         ratio = self.aspect_ratio
         x0, y0, x1, y1 = self._rect_bounds(self._drag_start_rect)
 
-        if self._active_handle == HANDLE_LEFT:
-            fixed_x = x1
-            new_x0 = min(max(0, image_pos.x()), x1 - MIN_SELECTION_SIZE)
-            width = max(MIN_SELECTION_SIZE, fixed_x - new_x0)
-            height = width / ratio
-            new_x1 = fixed_x
-            center_y = (y0 + y1) / 2
-            new_y0 = center_y - height / 2
-            new_y1 = center_y + height / 2
-        elif self._active_handle == HANDLE_RIGHT:
-            fixed_x = x0
-            new_x1 = max(
-                min(image_pos.x(), self.image_width()), x0 + MIN_SELECTION_SIZE
-            )
-            width = max(MIN_SELECTION_SIZE, new_x1 - fixed_x)
-            height = width / ratio
-            new_x0 = fixed_x
-            center_y = (y0 + y1) / 2
-            new_y0 = center_y - height / 2
-            new_y1 = center_y + height / 2
-        elif self._active_handle in (HANDLE_TOP, HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT):
-            fixed_y = y1
-            height = max(MIN_SELECTION_SIZE, fixed_y - image_pos.y())
-            new_y0 = fixed_y - height
-            new_y1 = fixed_y
-            width = height * ratio
-            if self._active_handle == HANDLE_TOP_LEFT:
-                fixed_x = x1
-                new_x1 = fixed_x
-                new_x0 = fixed_x - width
-            elif self._active_handle == HANDLE_TOP_RIGHT:
-                fixed_x = x0
-                new_x0 = fixed_x
-                new_x1 = fixed_x + width
-            else:
-                center_x = (x0 + x1) / 2
-                new_x0 = center_x - width / 2
-                new_x1 = center_x + width / 2
-        elif self._active_handle in (
-            HANDLE_BOTTOM,
-            HANDLE_BOTTOM_LEFT,
-            HANDLE_BOTTOM_RIGHT,
-        ):
-            fixed_y = y0
-            height = max(MIN_SELECTION_SIZE, image_pos.y() - fixed_y)
-            new_y0 = fixed_y
-            new_y1 = fixed_y + height
-            width = height * ratio
-            if self._active_handle == HANDLE_BOTTOM_LEFT:
-                fixed_x = x1
-                new_x1 = fixed_x
-                new_x0 = fixed_x - width
-            elif self._active_handle == HANDLE_BOTTOM_RIGHT:
-                fixed_x = x0
-                new_x0 = fixed_x
-                new_x1 = fixed_x + width
-            else:
-                center_x = (x0 + x1) / 2
-                new_x0 = center_x - width / 2
-                new_x1 = center_x + width / 2
+        if self._active_handle in (HANDLE_LEFT, HANDLE_RIGHT):
+            fixed_x = x1 if self._active_handle == HANDLE_LEFT else x0
+            width = max(MIN_SELECTION_SIZE, abs(fixed_x - image_pos.x()))
+            return width, width / ratio
+
+        if self._active_handle in TOP_HANDLES:
+            height = max(MIN_SELECTION_SIZE, y1 - image_pos.y())
+        elif self._active_handle in BOTTOM_HANDLES:
+            height = max(MIN_SELECTION_SIZE, image_pos.y() - y0)
         else:
             delta_y = image_pos.y() - self._drag_start.y()
             height = max(
                 MIN_SELECTION_SIZE, self._drag_start_rect.height() + delta_y * 2
             )
-            center_y = (y0 + y1) / 2
-            new_y0 = center_y - height / 2
-            new_y1 = center_y + height / 2
-            width = height * ratio
-            center_x = (x0 + x1) / 2
-            new_x0 = center_x - width / 2
-            new_x1 = center_x + width / 2
+        return height * ratio, height
 
-        return self._fit_fixed_rect(new_x0, new_y0, new_x1, new_y1, ratio)
-
-    def _fit_fixed_rect(self, x0, y0, x1, y1, ratio):
-        width = x1 - x0
-        height = y1 - y0
-        scale = min(
-            1.0,
-            self.image_width() / max(1, width),
-            self.image_height() / max(1, height),
+    def _apply_synced_fixed_ratio_resize(self, image_pos):
+        width, height = self._fixed_ratio_size_from_drag(image_pos)
+        width, height = self._bounded_fixed_ratio_size(
+            width,
+            height,
+            self._drag_start_rect,
+            self._other_active_rect(),
         )
-        width *= scale
-        height = width / ratio
-
-        if x0 < 0:
-            x1 = width
-            x0 = 0
-        elif x1 > self.image_width():
-            x1 = self.image_width()
-            x0 = x1 - width
-        else:
-            x1 = x0 + width
-
-        if y0 < 0:
-            y1 = height
-            y0 = 0
-        elif y1 > self.image_height():
-            y1 = self.image_height()
-            y0 = y1 - height
-        else:
-            y1 = y0 + height
-        return self._rect_from_bounds(x0, y0, x1, y1)
+        self._set_rect_by_name(
+            self._active_rect_name,
+            self._anchored_rect_from_reference(
+                self._drag_start_rect,
+                width,
+                height,
+                self._active_handle,
+            ),
+        )
+        self._sync_other_rect_size(width, height)
 
     def _draw_selection(self, painter, image_rect, color, label):
         if image_rect.isNull():
@@ -448,71 +398,25 @@ class SelectionLabel(QLabel):
             and self.aspect_ratio is not None
         )
 
-    def _sync_other_rect_size(self, source_rect):
+    def _sync_other_rect_size(self, width, height):
         other_name = "rect_p2" if self._active_rect_name == "rect_p1" else "rect_p1"
         other_rect = self._rect_by_name(other_name)
         if other_rect.isNull():
             return
 
-        width = source_rect.width()
-        height = source_rect.height()
-        fixed_x, fixed_y = self._sync_other_rect_fixed_point(other_rect)
+        self._set_rect_by_name(
+            other_name,
+            self._anchored_rect_from_reference(
+                other_rect,
+                width,
+                height,
+                self._active_handle,
+            ),
+        )
 
-        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT, HANDLE_LEFT):
-            x = fixed_x - width + 1
-        elif self._active_handle in (
-            HANDLE_TOP_RIGHT,
-            HANDLE_BOTTOM_RIGHT,
-            HANDLE_RIGHT,
-        ):
-            x = fixed_x
-        else:
-            x = round(fixed_x - width / 2)
-
-        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT, HANDLE_TOP):
-            y = fixed_y - height + 1
-        elif self._active_handle in (
-            HANDLE_BOTTOM_LEFT,
-            HANDLE_BOTTOM_RIGHT,
-            HANDLE_BOTTOM,
-        ):
-            y = fixed_y
-        else:
-            y = round(fixed_y - height / 2)
-
-        rect = QRect(x, y, width, height)
-        rect = self._clamp_rect_to_image(rect)
-        self._set_rect_by_name(other_name, rect)
-
-    def _sync_other_rect_fixed_point(self, rect):
-        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_BOTTOM_LEFT, HANDLE_LEFT):
-            fixed_x = rect.right()
-        elif self._active_handle in (
-            HANDLE_TOP_RIGHT,
-            HANDLE_BOTTOM_RIGHT,
-            HANDLE_RIGHT,
-        ):
-            fixed_x = rect.left()
-        else:
-            fixed_x = rect.center().x()
-
-        if self._active_handle in (HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT, HANDLE_TOP):
-            fixed_y = rect.bottom()
-        elif self._active_handle in (
-            HANDLE_BOTTOM_LEFT,
-            HANDLE_BOTTOM_RIGHT,
-            HANDLE_BOTTOM,
-        ):
-            fixed_y = rect.top()
-        else:
-            fixed_y = rect.center().y()
-
-        return fixed_x, fixed_y
-
-    def _clamp_rect_to_image(self, rect):
-        x = min(max(0, rect.x()), self.image_width() - rect.width())
-        y = min(max(0, rect.y()), self.image_height() - rect.height())
-        return QRect(x, y, rect.width(), rect.height())
+    def _other_active_rect(self):
+        other_name = "rect_p2" if self._active_rect_name == "rect_p1" else "rect_p1"
+        return self._rect_by_name(other_name)
 
     def _reset_operation(self):
         self._operation = None
@@ -546,12 +450,12 @@ class SelectionLabel(QLabel):
         y = (self.height() - height) // 2
         return QRect(x, y, width, height)
 
-    def _widget_to_image_pos(self, pos, clamp=False):
+    def _widget_to_image_pos(self, pos, allow_outside=False):
         """ウィジェット座標をプレビュー画像の元座標へ変換する。"""
         display_rect = self._display_rect()
         if display_rect.isNull():
             return None
-        if not clamp and not display_rect.contains(pos):
+        if not allow_outside and not display_rect.contains(pos):
             return None
 
         x = round(
@@ -560,8 +464,6 @@ class SelectionLabel(QLabel):
         y = round(
             (pos.y() - display_rect.y()) * self._pixmap.height() / display_rect.height()
         )
-        x = min(max(0, x), self._pixmap.width())
-        y = min(max(0, y), self._pixmap.height())
         return QPoint(x, y)
 
     def _image_to_widget_rect(self, rect):
@@ -598,6 +500,95 @@ class SelectionLabel(QLabel):
     @staticmethod
     def _rect_bounds(rect):
         return rect.x(), rect.y(), rect.x() + rect.width(), rect.y() + rect.height()
+
+    @staticmethod
+    def _horizontal_anchor_mode(handle):
+        if handle in LEFT_HANDLES:
+            return "max"
+        if handle in RIGHT_HANDLES:
+            return "min"
+        return "center"
+
+    @staticmethod
+    def _vertical_anchor_mode(handle):
+        if handle in TOP_HANDLES:
+            return "max"
+        if handle in BOTTOM_HANDLES:
+            return "min"
+        return "center"
+
+    @staticmethod
+    def _anchored_coordinate(minimum, maximum, mode):
+        if mode == "min":
+            return minimum
+        if mode == "max":
+            return maximum
+        return (minimum + maximum) / 2
+
+    @staticmethod
+    def _anchored_origin(anchor, size, mode, inclusive=False):
+        if mode == "min":
+            return round(anchor)
+        if mode == "max":
+            offset = size - 1 if inclusive else size
+            return round(anchor - offset)
+        return round(anchor - size / 2)
+
+    @classmethod
+    def _anchored_bounds(cls, anchor, size, mode):
+        start = cls._anchored_origin(anchor, size, mode)
+        return start, start + size
+
+    @classmethod
+    def _anchored_rect_from_reference(cls, rect, width, height, handle):
+        x0, y0, x1, y1 = cls._rect_bounds(rect)
+        x_mode = cls._horizontal_anchor_mode(handle)
+        y_mode = cls._vertical_anchor_mode(handle)
+        anchor_x = cls._anchored_coordinate(x0, x1, x_mode)
+        anchor_y = cls._anchored_coordinate(y0, y1, y_mode)
+        new_x0, new_x1 = cls._anchored_bounds(anchor_x, width, x_mode)
+        new_y0, new_y1 = cls._anchored_bounds(anchor_y, height, y_mode)
+        return cls._rect_from_bounds(new_x0, new_y0, new_x1, new_y1)
+
+    def _bounded_fixed_ratio_size(self, width, height, *rects):
+        max_scale = 1.0
+        for rect in rects:
+            if rect.isNull():
+                continue
+            max_width, max_height = self._max_fixed_ratio_size_for_rect(
+                rect,
+                self._active_handle,
+            )
+            max_scale = min(
+                max_scale,
+                max_width / max(width, 1),
+                max_height / max(height, 1),
+            )
+
+        if max_scale >= 1.0:
+            return width, height
+        return max(MIN_SELECTION_SIZE, width * max_scale), max(
+            MIN_SELECTION_SIZE, height * max_scale
+        )
+
+    def _max_fixed_ratio_size_for_rect(self, rect, handle):
+        x0, y0, x1, y1 = self._rect_bounds(rect)
+        x_mode = self._horizontal_anchor_mode(handle)
+        y_mode = self._vertical_anchor_mode(handle)
+        anchor_x = self._anchored_coordinate(x0, x1, x_mode)
+        anchor_y = self._anchored_coordinate(y0, y1, y_mode)
+        return (
+            self._max_size_for_axis(anchor_x, self.image_width(), x_mode),
+            self._max_size_for_axis(anchor_y, self.image_height(), y_mode),
+        )
+
+    @staticmethod
+    def _max_size_for_axis(anchor, limit, mode):
+        if mode == "min":
+            return max(MIN_SELECTION_SIZE, limit - anchor)
+        if mode == "max":
+            return max(MIN_SELECTION_SIZE, anchor)
+        return max(MIN_SELECTION_SIZE, min(anchor, limit - anchor) * 2)
 
     @staticmethod
     def _rect_from_bounds(x0, y0, x1, y1):

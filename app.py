@@ -71,33 +71,10 @@ class PDFSnipper(QMainWindow):
         self.canvas = SelectionLabel()
         self.canvas.setStyleSheet("border: 2px solid #ccc; background-color: #eee;")
 
-        self.btn_preview_previous = QPushButton("前へ")
-        self.btn_preview_previous.setFixedSize(40, 20)
-        self.btn_preview_previous.setAutoRepeat(True)
-        self.btn_preview_previous.setAutoRepeatDelay(300)
-        self.btn_preview_previous.setAutoRepeatInterval(120)
-        self.btn_preview_previous.clicked.connect(lambda: self.change_preview_page(-1))
-        self.btn_preview_previous.setStyleSheet("""
-            QPushButton {
-                background-color: #D8D8D8;
-                color: black;
-            }
-            """)
+        self.btn_preview_previous = self._build_preview_button("前へ", -1)
         self.preview_page_label = QLabel("0 / 0")
         self.preview_page_label.setAlignment(Qt.AlignCenter)
-
-        self.btn_preview_next = QPushButton("次へ")
-        self.btn_preview_next.setFixedSize(40, 20)
-        self.btn_preview_next.setAutoRepeat(True)
-        self.btn_preview_next.setAutoRepeatDelay(300)
-        self.btn_preview_next.setStyleSheet("""
-            QPushButton {
-                background-color: #D8D8D8;
-                color: black;
-            }
-            """)
-        self.btn_preview_next.setAutoRepeatInterval(120)
-        self.btn_preview_next.clicked.connect(lambda: self.change_preview_page(1))
+        self.btn_preview_next = self._build_preview_button("次へ", 1)
 
         page_nav_buttons = QVBoxLayout()
         page_nav_buttons.setSpacing(8)
@@ -146,6 +123,22 @@ class PDFSnipper(QMainWindow):
         layout.addWidget(self.btn_remove)
         layout.addWidget(self.file_list)
         return self._group_box("インポート（ドラッグで並び替え）", layout)
+
+    def _build_preview_button(self, label, offset):
+        """プレビューページ移動ボタンを作る。"""
+        button = QPushButton(label)
+        button.setFixedSize(40, 20)
+        button.setAutoRepeat(True)
+        button.setAutoRepeatDelay(300)
+        button.setAutoRepeatInterval(120)
+        button.clicked.connect(lambda: self.change_preview_page(offset))
+        button.setStyleSheet("""
+            QPushButton {
+                background-color: #D8D8D8;
+                color: black;
+            }
+            """)
+        return button
 
     def _build_crop_group(self):
         """スキャン種別と切り抜き範囲指定用のUIグループを作る。"""
@@ -414,8 +407,9 @@ class PDFSnipper(QMainWindow):
         if not save_dir:
             return
 
-        output_path = self._build_processing_options(save_dir).output_path
-        output_title = self._build_processing_options(save_dir).output_title
+        options = self._build_processing_options(save_dir)
+        output_path = options.output_path
+        output_title = options.output_title
         if os.path.exists(output_path):
             reply = QMessageBox.question(
                 self,
@@ -429,7 +423,6 @@ class PDFSnipper(QMainWindow):
 
         self._set_processing_state(True)
         try:
-            options = self._build_processing_options(save_dir)
             result = process_documents(options, self._update_file_progress)
             self._set_progress_value(result.page_count, result.page_count)
             message = f"保存完了:\n{result.output_path}"
