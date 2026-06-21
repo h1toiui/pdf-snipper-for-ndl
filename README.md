@@ -49,8 +49,15 @@ pip install -r requirements.txt
 OCRを使う場合は、別途NDLOCR-Liteも用意してください。
 
 ```bash
-python3.12 -m venv .venv-ndlocr
+#Mac
+python3 -m venv .venv-ndlocr
 .venv-ndlocr/bin/python -m pip install git+https://github.com/ndl-lab/ndlocr-lite.git
+```
+
+```powershell
+#Windows
+py -m venv .venv-ndlocr
+.venv-ndlocr\Scripts\python.exe -m pip install git+https://github.com/ndl-lab/ndlocr-lite.git
 ```
 
 ### 起動
