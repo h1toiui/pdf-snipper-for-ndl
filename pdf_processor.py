@@ -151,15 +151,17 @@ def _count_output_pages(file_paths, crop_count):
     return page_count
 
 
-def _qt_rect_to_pdf_rect(q_rect, page_width, page_height, viewport_width, viewport_height):
+def _qt_rect_to_pdf_rect(
+    q_rect, page_width, page_height, viewport_width, viewport_height
+):
     """プレビュー上のQt矩形をPDFページ座標の矩形へ変換する。"""
     scale_x = page_width / viewport_width
     scale_y = page_height / viewport_height
     return fitz.Rect(
-        q_rect.left() * scale_x,
-        q_rect.top() * scale_y,
-        q_rect.right() * scale_x,
-        q_rect.bottom() * scale_y,
+        q_rect.x() * scale_x,
+        q_rect.y() * scale_y,
+        (q_rect.x() + q_rect.width()) * scale_x,
+        (q_rect.y() + q_rect.height()) * scale_y,
     )
 
 
