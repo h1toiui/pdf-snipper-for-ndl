@@ -148,6 +148,9 @@ def _page_xhtml(index, img_name, width, height, ocr_page=None):
       overflow: hidden;
       white-space: nowrap;
       line-height: 1;
+      text-align: justify;
+      text-align-last: justify;
+      text-justify: inter-character;
     }}
     .ocr-line.vertical {{
       writing-mode: vertical-rl;
