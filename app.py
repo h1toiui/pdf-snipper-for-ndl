@@ -127,17 +127,10 @@ class PDFSnipper(QMainWindow):
     def _build_preview_button(self, label, offset):
         """プレビューページ移動ボタンを作る。"""
         button = QPushButton(label)
-        button.setFixedSize(40, 20)
         button.setAutoRepeat(True)
         button.setAutoRepeatDelay(300)
         button.setAutoRepeatInterval(120)
         button.clicked.connect(lambda: self.change_preview_page(offset))
-        button.setStyleSheet("""
-            QPushButton {
-                background-color: #D8D8D8;
-                color: black;
-            }
-            """)
         return button
 
     def _build_crop_group(self):
