@@ -195,6 +195,7 @@ class PDFSnipper(QMainWindow):
         self.radio_epub_rtl.toggled.connect(self._update_cover_image_controls)
         self.check_ocr = QCheckBox("OCR（処理に時間がかかります）")
 
+        self.cover_image_title_label = QLabel("表紙:")
         self.btn_select_cover = QPushButton("表紙画像を選択")
         self.btn_select_cover.clicked.connect(self.select_cover_image)
         self.cover_image_label = QLabel()
@@ -225,6 +226,7 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_ltr,
             self.radio_epub_rtl,
             self.check_ocr,
+            self.cover_image_title_label,
             self.btn_select_cover,
             self.cover_image_label,
             QLabel("ファイル名:"),
@@ -491,12 +493,15 @@ class PDFSnipper(QMainWindow):
             image_processing=self._selected_image_processing(),
             ocr_text_output=self.check_ocr.isChecked(),
             ocr_command=self._ocr_command(),
-            cover_image_path=self._cover_image_path if output_format == OUTPUT_EPUB else "",
+            cover_image_path=(
+                self._cover_image_path if output_format == OUTPUT_EPUB else ""
+            ),
         )
 
     def _update_cover_image_controls(self, *args):
         """EPUB選択中だけ表紙画像UIを表示し、選択済みパスを表示する。"""
         is_epub = not self.radio_pdf.isChecked()
+        self.cover_image_title_label.setVisible(is_epub)
         self.btn_select_cover.setVisible(is_epub)
         has_cover = bool(self._cover_image_path)
         self.cover_image_label.setVisible(is_epub and has_cover)
