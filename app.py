@@ -104,8 +104,8 @@ class PDFSnipper(QMainWindow):
         self._update_preview_controls()
 
     def _build_file_group(self):
-        """PDF/画像の追加、解除、並び替え用のUIグループを作る。"""
-        self.btn_select = QPushButton("PDF/画像を追加")
+        """PDF / 画像の追加、解除、並び替え用のUIグループを作る。"""
+        self.btn_select = QPushButton("PDF / 画像を追加")
         self.btn_select.clicked.connect(self.select_files)
 
         self.btn_remove = QPushButton("選択したファイルを解除")
@@ -252,10 +252,10 @@ class PDFSnipper(QMainWindow):
         return self._group_box("実行", layout)
 
     def select_files(self):
-        """ファイルダイアログで選ばれたPDF/画像を一覧へ追加する。"""
+        """ファイルダイアログで選ばれたPDF / 画像を一覧へ追加する。"""
         files, _ = QFileDialog.getOpenFileNames(
             self,
-            "PDF/画像を選択",
+            "PDF / 画像を選択",
             "",
             "Documents and Images (*.pdf *.png *.jpg *.jpeg);;PDF Files (*.pdf);;Image Files (*.png *.jpg *.jpeg)",
         )
