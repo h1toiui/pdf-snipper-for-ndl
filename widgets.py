@@ -49,26 +49,12 @@ class SelectionLabel(QLabel):
 
     def setPixmap(self, pixmap):
         """プレビュー画像を設定し、選択枠を新しい画像寸法へ追従させる。"""
-        old_width = self._pixmap.width()
-        old_height = self._pixmap.height()
         self._pixmap = QPixmap(pixmap)
         self.zoom = 1.0
 
-        if old_width > 0 and old_height > 0:
-            self.rect_p1 = self._scaled_rect(
-                self.rect_p1,
-                old_width,
-                old_height,
-                self._pixmap.width(),
-                self._pixmap.height(),
-            )
-            self.rect_p2 = self._scaled_rect(
-                self.rect_p2,
-                old_width,
-                old_height,
-                self._pixmap.width(),
-                self._pixmap.height(),
-            )
+        if not self._pixmap.isNull():
+            self.rect_p1 = self._fit_rect_to_image(self.rect_p1)
+            self.rect_p2 = self._fit_rect_to_image(self.rect_p2)
         if not self._pixmap.isNull() and not self.selected_rects():
             self._create_initial_selection()
         self.update()
@@ -651,13 +637,23 @@ class SelectionLabel(QLabel):
     def _rect_from_bounds(x0, y0, x1, y1):
         return QRect(round(x0), round(y0), round(x1 - x0), round(y1 - y0))
 
-    @staticmethod
-    def _scaled_rect(rect, old_width, old_height, new_width, new_height):
+    def _fit_rect_to_image(self, rect):
+        """ページ移動時、既存枠をリセットせず現在画像内へ収める。"""
         if rect.isNull():
             return QRect()
-        return QRect(
-            round(rect.x() * new_width / old_width),
-            round(rect.y() * new_height / old_height),
-            round(rect.width() * new_width / old_width),
-            round(rect.height() * new_height / old_height),
-        )
+
+        image_width = self.image_width()
+        image_height = self.image_height()
+        width = max(MIN_SELECTION_SIZE, rect.width())
+        height = max(MIN_SELECTION_SIZE, rect.height())
+
+        if width > image_width or height > image_height:
+            scale = min(image_width / max(1, width), image_height / max(1, height))
+            width = max(1, round(width * scale))
+            height = max(1, round(height * scale))
+
+        width = min(width, image_width)
+        height = min(height, image_height)
+        x = min(max(0, rect.x()), max(0, image_width - width))
+        y = min(max(0, rect.y()), max(0, image_height - height))
+        return QRect(round(x), round(y), round(width), round(height))
