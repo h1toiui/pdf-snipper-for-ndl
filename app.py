@@ -104,8 +104,8 @@ class PDFSnipper(QMainWindow):
         self._update_preview_controls()
 
     def _build_file_group(self):
-        """PDF追加、解除、並び替え用のUIグループを作る。"""
-        self.btn_select = QPushButton("PDFファイルを追加")
+        """PDF/画像の追加、解除、並び替え用のUIグループを作る。"""
+        self.btn_select = QPushButton("PDF/画像を追加")
         self.btn_select.clicked.connect(self.select_files)
 
         self.btn_remove = QPushButton("選択したファイルを解除")
@@ -252,9 +252,12 @@ class PDFSnipper(QMainWindow):
         return self._group_box("実行", layout)
 
     def select_files(self):
-        """ファイルダイアログで選ばれたPDFを一覧へ追加する。"""
+        """ファイルダイアログで選ばれたPDF/画像を一覧へ追加する。"""
         files, _ = QFileDialog.getOpenFileNames(
-            self, "PDFを選択", "", "PDF Files (*.pdf)"
+            self,
+            "PDF/画像を選択",
+            "",
+            "Documents and Images (*.pdf *.png *.jpg *.jpeg);;PDF Files (*.pdf);;Image Files (*.png *.jpg *.jpeg)",
         )
         is_first_add = self.file_list.count() == 0
         for file_path in sorted(files):
@@ -265,13 +268,13 @@ class PDFSnipper(QMainWindow):
             self.refresh_preview(reset_page=is_first_add)
 
     def remove_selected_files(self):
-        """一覧で選択中のPDFを処理対象から外す。"""
+        """一覧で選択中のファイルを処理対象から外す。"""
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
         self.refresh_preview(reset_page=False)
 
     def refresh_preview(self, reset_page=False):
-        """複合PDFのグローバルページを切り抜き用プレビューへ表示する。"""
+        """複合入力のグローバルページを切り抜き用プレビューへ表示する。"""
         if self.file_list.count() == 0:
             self.canvas.clear()
             self.canvas.clear_selection()
@@ -300,7 +303,7 @@ class PDFSnipper(QMainWindow):
         self._update_preview_controls()
 
     def _collect_file_page_offsets(self):
-        """全ファイルのページオフセットと総ページ数を返す。"""
+        """全入力のページオフセットと総ページ数を返す。"""
         offsets = [0]
         total_pages = 0
         for i in range(self.file_list.count()):
@@ -429,7 +432,7 @@ class PDFSnipper(QMainWindow):
             self._set_processing_state(False)
 
     def _validate_inputs(self):
-        """実行に必要なPDF、切り抜き範囲、プレビューの有無を確認する。"""
+        """実行に必要な入力、切り抜き範囲、プレビューの有無を確認する。"""
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "エラー", "ファイルを選択してください")
             return False
@@ -482,7 +485,7 @@ class PDFSnipper(QMainWindow):
         return 48
 
     def _file_paths(self):
-        """一覧に並んでいるPDFパスを表示順で返す。"""
+        """一覧に並んでいるファイルパスを表示順で返す。"""
         return [
             self.file_list.item(i).data(Qt.UserRole)
             for i in range(self.file_list.count())
@@ -503,7 +506,7 @@ class PDFSnipper(QMainWindow):
         return resolved or "ndlocr-lite"
 
     def _add_file(self, file_path):
-        """PDFパスを表示名付きのリスト項目として追加する。"""
+        """ファイルパスを表示名付きのリスト項目として追加する。"""
         count = self.file_list.count() + 1
         display_text = f"{count}. {os.path.basename(file_path)}"
         item = QListWidgetItem(display_text)
@@ -523,7 +526,7 @@ class PDFSnipper(QMainWindow):
             item.setText(display_text)
 
     def _autofill_output_metadata(self):
-        """先頭PDFのメタデータからタイトルと著者を未編集欄へ自動入力する。"""
+        """先頭ファイルのメタデータからタイトルと著者を未編集欄へ自動入力する。"""
         if self.file_list.count() == 0:
             return
 
