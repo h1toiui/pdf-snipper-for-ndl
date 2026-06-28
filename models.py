@@ -28,6 +28,7 @@ class ProcessingOptions:
     image_processing: str = IMAGE_PROCESS_NONE
     ocr_text_output: bool = False
     ocr_command: str = "ndlocr-lite"
+    cover_image_path: str = ""
 
 
 @dataclass(frozen=True)

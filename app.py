@@ -50,6 +50,7 @@ class PDFSnipper(QMainWindow):
         self._author_was_edited = False
         self._preview_global_page_index = 0
         self._preview_total_page_count = 0
+        self._cover_image_path = ""
         self._build_ui()
 
     def _build_ui(self):
@@ -189,7 +190,15 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_ltr,
             self.radio_epub_rtl,
         )
+        self.radio_pdf.toggled.connect(self._update_cover_image_controls)
+        self.radio_epub_ltr.toggled.connect(self._update_cover_image_controls)
+        self.radio_epub_rtl.toggled.connect(self._update_cover_image_controls)
         self.check_ocr = QCheckBox("OCR（処理に時間がかかります）")
+
+        self.btn_select_cover = QPushButton("表紙画像を選択")
+        self.btn_select_cover.clicked.connect(self.select_cover_image)
+        self.cover_image_label = QLabel()
+        self.cover_image_label.setWordWrap(True)
 
         self.filename_input = QLineEdit()
         self.filename_input.textEdited.connect(
@@ -216,6 +225,8 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_ltr,
             self.radio_epub_rtl,
             self.check_ocr,
+            self.btn_select_cover,
+            self.cover_image_label,
             QLabel("ファイル名:"),
             self.filename_input,
             QLabel("著者:"),
@@ -223,6 +234,7 @@ class PDFSnipper(QMainWindow):
         ):
             layout.addWidget(widget)
 
+        self._update_cover_image_controls()
         return self._group_box("出力オプション", layout)
 
     def _build_execution_group(self):
@@ -266,6 +278,17 @@ class PDFSnipper(QMainWindow):
         if files:
             self._autofill_output_metadata()
             self.refresh_preview(reset_page=is_first_add)
+
+    def select_cover_image(self):
+        """EPUB表紙として埋め込む画像を選択する。キャンセル時は選択を解除する。"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "表紙画像を選択",
+            "",
+            "Image Files (*.png *.jpg *.jpeg)",
+        )
+        self._cover_image_path = file_path or ""
+        self._update_cover_image_controls()
 
     def remove_selected_files(self):
         """一覧で選択中のファイルを処理対象から外す。"""
@@ -468,7 +491,17 @@ class PDFSnipper(QMainWindow):
             image_processing=self._selected_image_processing(),
             ocr_text_output=self.check_ocr.isChecked(),
             ocr_command=self._ocr_command(),
+            cover_image_path=self._cover_image_path if output_format == OUTPUT_EPUB else "",
         )
+
+    def _update_cover_image_controls(self, *args):
+        """EPUB選択中だけ表紙画像UIを表示し、選択済みパスを表示する。"""
+        is_epub = not self.radio_pdf.isChecked()
+        self.btn_select_cover.setVisible(is_epub)
+        has_cover = bool(self._cover_image_path)
+        self.cover_image_label.setVisible(is_epub and has_cover)
+        if has_cover:
+            self.cover_image_label.setText(f"✔︎ {self._cover_image_path}")
 
     def _selected_image_processing(self):
         """UIで選択された画像処理モードを返す。"""

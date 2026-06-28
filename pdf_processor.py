@@ -122,6 +122,7 @@ def process_documents(
                 options.epub_direction,
                 ocr_pages=ocr_pages,
                 author=options.output_author,
+                cover_image_path=options.cover_image_path,
             )
 
         return ProcessingResult(
