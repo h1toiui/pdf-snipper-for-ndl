@@ -37,7 +37,7 @@ from models import (
     ProcessingOptions,
 )
 from pdf_processor import normalize_output_path, process_documents
-from widgets import SELECTION_SPREAD, SELECTION_TWO_PAGE, SelectionLabel
+from widgets import SELECTION_SINGLE_PAGE, SELECTION_TWO_PAGE, SelectionLabel
 
 
 class PDFSnipper(QMainWindow):
@@ -135,14 +135,14 @@ class PDFSnipper(QMainWindow):
 
     def _build_crop_group(self):
         """スキャン種別と切り抜き範囲指定用のUIグループを作る。"""
-        self.radio_mode_spread = QRadioButton("見開き")
-        self.radio_mode_two_page = QRadioButton("左右分割")
-        self.radio_mode_spread.setChecked(True)
+        self.radio_mode_single_page = QRadioButton("シングルページ")
+        self.radio_mode_two_page = QRadioButton("2ページ")
+        self.radio_mode_single_page.setChecked(True)
         self.selection_mode_group = self._button_group(
-            self.radio_mode_spread,
+            self.radio_mode_single_page,
             self.radio_mode_two_page,
         )
-        self.radio_mode_spread.toggled.connect(self.update_selection_mode)
+        self.radio_mode_single_page.toggled.connect(self.update_selection_mode)
         self.radio_mode_two_page.toggled.connect(self.update_selection_mode)
 
         self.aspect_ratio_combo = QComboBox()
@@ -154,7 +154,7 @@ class PDFSnipper(QMainWindow):
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel("切り抜きモード:"))
-        layout.addWidget(self.radio_mode_spread)
+        layout.addWidget(self.radio_mode_single_page)
         layout.addWidget(self.radio_mode_two_page)
         layout.addWidget(QLabel("アスペクト比:"))
         layout.addWidget(self.aspect_ratio_combo)
@@ -357,12 +357,12 @@ class PDFSnipper(QMainWindow):
         self.refresh_preview()
 
     def update_selection_mode(self, checked):
-        """見開き・2P設定を選択ウィジェットへ反映する。"""
+        """1P・2P設定を選択ウィジェットへ反映する。"""
         if not checked:
             return
         mode = (
-            SELECTION_SPREAD
-            if self.radio_mode_spread.isChecked()
+            SELECTION_SINGLE_PAGE
+            if self.radio_mode_single_page.isChecked()
             else SELECTION_TWO_PAGE
         )
         self.canvas.set_selection_mode(mode)

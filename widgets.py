@@ -2,7 +2,7 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QCursor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QLabel
 
-SELECTION_SPREAD = "spread"
+SELECTION_SINGLE_PAGE = "single_page"
 SELECTION_TWO_PAGE = "two_page"
 
 HANDLE_LEFT = "left"
@@ -37,7 +37,7 @@ class SelectionLabel(QLabel):
         self.zoom = 1.0
         self.rect_p1 = QRect()
         self.rect_p2 = QRect()
-        self.selection_mode = SELECTION_SPREAD
+        self.selection_mode = SELECTION_SINGLE_PAGE
         self.aspect_ratio = None
         self.source_aspect_ratio = 1.0
         self._operation = None
@@ -92,8 +92,8 @@ class SelectionLabel(QLabel):
         return max(1, self._pixmap.height())
 
     def set_selection_mode(self, mode):
-        """見開きまたは2Pへ切り替え、既存の選択枠を破棄する。"""
-        if mode not in (SELECTION_SPREAD, SELECTION_TWO_PAGE):
+        """シングルページまたは2ページへ切り替え、既存の選択枠を破棄する。"""
+        if mode not in (SELECTION_SINGLE_PAGE, SELECTION_TWO_PAGE):
             raise ValueError(f"Unsupported selection mode: {mode}")
         if self.selection_mode == mode:
             return
@@ -178,7 +178,7 @@ class SelectionLabel(QLabel):
 
     def selected_rects(self):
         """現在の選択モードで有効な切り抜き矩形を返す。"""
-        if self.selection_mode == SELECTION_SPREAD:
+        if self.selection_mode == SELECTION_SINGLE_PAGE:
             return [self.rect_p1] if not self.rect_p1.isNull() else []
         return [rect for rect in (self.rect_p1, self.rect_p2) if not rect.isNull()]
 
@@ -205,7 +205,7 @@ class SelectionLabel(QLabel):
         image_height = self.image_height()
         gap = max(8, round(image_width * 0.02))
 
-        if self.selection_mode == SELECTION_SPREAD:
+        if self.selection_mode == SELECTION_SINGLE_PAGE:
             width, height = self._initial_size(image_width, image_height, image_width)
             self.rect_p1 = self._centered_rect(width, height, image_width / 2)
             self.rect_p2 = QRect()
@@ -364,7 +364,7 @@ class SelectionLabel(QLabel):
         painter.setBrush(Qt.NoBrush)
 
     def _page1_label(self):
-        return "Page" if self.selection_mode == SELECTION_SPREAD else "Page 1"
+        return "Page" if self.selection_mode == SELECTION_SINGLE_PAGE else "Page 1"
 
     def _hit_test(self, widget_pos):
         for name, image_rect in reversed(self._selection_items()):
