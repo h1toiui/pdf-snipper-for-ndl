@@ -1,9 +1,11 @@
 import os
+import shlex
 import shutil
+import sys
 
 import fitz
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -573,6 +575,19 @@ class PDFSnipper(QMainWindow):
         if self.canvas.pixmap().isNull():
             QMessageBox.warning(self, "エラー", "プレビュー画像を読み込めませんでした")
             return False
+        if self.check_ocr.isChecked() and not self._ocr_command():
+            message_box = QMessageBox(self)
+            message_box.setIcon(QMessageBox.Critical)
+            message_box.setWindowTitle("NDLOCR-Liteが見つかりません")
+            message_box.setText("NDLOCR-Liteが見つからないため、OCRを実行できません。")
+            message_box.setStandardButtons(QMessageBox.Ok | QMessageBox.Help)
+            if message_box.exec() == QMessageBox.Help:
+                QDesktopServices.openUrl(
+                    QUrl(
+                        "https://github.com/h1toiui/pdf-snipper-for-ndl#OCRのセットアップ"
+                    )
+                )
+            return False
         return True
 
     def _build_processing_options(self, save_dir):
@@ -636,18 +651,57 @@ class PDFSnipper(QMainWindow):
         ]
 
     def _ocr_command(self):
-        """環境変数、ローカルvenv、PATHの順にNDLOCR-Liteコマンドを探す。"""
+        """環境変数、アプリ横のOCR環境、PATHの順にNDLOCR-Liteコマンドを探す。"""
         env_command = os.environ.get("NDLOCR_LITE_COMMAND")
-        if env_command:
+        if env_command and self._is_available_command(env_command):
             return env_command
 
-        app_dir = os.path.dirname(os.path.abspath(__file__))
-        local_command = os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite")
-        if os.path.exists(local_command):
-            return local_command
+        for local_command in self._local_ocr_command_candidates():
+            if os.path.exists(local_command):
+                return local_command
 
         resolved = shutil.which("ndlocr-lite")
-        return resolved or "ndlocr-lite"
+        if resolved:
+            return resolved
+        resolved = shutil.which("ndlocr-lite.exe")
+        return resolved or ""
+
+    def _local_ocr_command_candidates(self):
+        """macOS/Linux/Windowsで使うアプリ横のOCRコマンド候補を返す。"""
+        app_dir = self._application_dir()
+        return [
+            os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite"),
+            os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite.exe"),
+            os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite"),
+            os.path.join(app_dir, "ocr-runtime", "bin", "ndlocr-lite"),
+            os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite.exe"),
+            os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite"),
+        ]
+
+    @staticmethod
+    def _application_dir():
+        """PyInstaller実行時は実行ファイルの隣、開発時はソースの場所を返す。"""
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.abspath(__file__))
+
+    @staticmethod
+    def _is_available_command(command):
+        """環境変数に指定されたコマンド文字列の実行ファイル部分を確認する。"""
+        try:
+            args = shlex.split(command, posix=os.name != "nt")
+        except ValueError:
+            return False
+        if not args:
+            return False
+
+        executable = args[0]
+        has_path_separator = os.sep in executable or (
+            os.altsep is not None and os.altsep in executable
+        )
+        if has_path_separator:
+            return os.path.exists(executable)
+        return shutil.which(executable) is not None
 
     def _add_file(self, file_path):
         """ファイルパスを表示名付きのリスト項目として追加する。"""

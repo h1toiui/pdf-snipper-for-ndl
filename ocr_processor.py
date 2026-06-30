@@ -88,7 +88,10 @@ def run_ndlocr_lite(
 
 def _build_command(command, image_dir, output_dir):
     """NDLOCR-Liteを呼び出すためのコマンド引数を組み立てる。"""
-    args = shlex.split(os.environ.get("NDLOCR_LITE_COMMAND", command))
+    args = shlex.split(
+        os.environ.get("NDLOCR_LITE_COMMAND", command),
+        posix=os.name != "nt",
+    )
     if not args:
         raise RuntimeError("NDLOCR-Lite command is empty.")
 
