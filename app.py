@@ -620,14 +620,16 @@ class PDFSnipper(QMainWindow):
         )
 
     def _update_cover_image_controls(self, *args):
-        """EPUB選択中だけ表紙画像UIを表示し、選択済みパスを表示する。"""
+        """EPUB選択中だけ表紙画像UIを表示し、選択状態に応じて表示文言を切り替える。"""
         is_epub = not self.radio_pdf.isChecked()
         self.cover_image_title_label.setVisible(is_epub)
         self.btn_select_cover.setVisible(is_epub)
+        self.cover_image_label.setVisible(is_epub)
         has_cover = bool(self._cover_image_path)
-        self.cover_image_label.setVisible(is_epub and has_cover)
         if has_cover:
             self.cover_image_label.setText(f"✔︎ {self._cover_image_path}")
+        else:
+            self.cover_image_label.setText("✗ 表紙なし")
 
     def _selected_image_processing(self):
         """UIで選択された画像処理モードを返す。"""
@@ -819,10 +821,12 @@ class PDFSnipper(QMainWindow):
             QPushButton {{
                 background-color: {background_color};
                 color: white;
+                font-weight: bold;
             }}
             QPushButton:disabled {{
                 background-color: {disabled_color};
                 color: #f2f2f2;
+                font-weight: bold;
             }}
             """)
 
