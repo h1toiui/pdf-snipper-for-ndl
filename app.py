@@ -1,12 +1,13 @@
 import os
+import shlex
 import shutil
+import sys
 
 import fitz
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -34,10 +35,60 @@ from models import (
     IMAGE_PROCESS_NONE,
     OUTPUT_EPUB,
     OUTPUT_PDF,
+    ProcessingCancelled,
     ProcessingOptions,
 )
 from pdf_processor import normalize_output_path, process_documents
-from widgets import SELECTION_SPREAD, SELECTION_TWO_PAGE, SelectionLabel
+from widgets import SELECTION_SINGLE_PAGE, SELECTION_TWO_PAGE, SelectionLabel
+
+STATUS_IDLE = "待機中"
+STATUS_STARTING = "処理を開始しています"
+STATUS_ERROR = "エラー"
+STATUS_COMPLETE = "完了: {file_size_mb:.2f} MB"
+STATUS_PROGRESS_MESSAGES = {
+    "prepare": "処理準備中: 0 / {total} ページ",
+    "render": "ページ画像を生成中: {current} / {total} ページ",
+    "ocr": "OCR処理中: NDLOCR-Liteの完了を待っています",
+    "ocr_done": "OCR完了: {current} / {total} ページ",
+    "embed": "OCRテキストを埋め込み中",
+    "save": "ファイル保存中",
+    "default": "処理中: {current} / {total}",
+}
+
+
+class ProcessingWorker(QObject):
+    progress = Signal(str, int, int)
+    finished = Signal(object)
+    failed = Signal(str)
+    cancelled = Signal()
+
+    def __init__(self, options):
+        super().__init__()
+        self._options = options
+        self._cancel_requested = False
+
+    @Slot()
+    def run(self):
+        """PDF/EPUB生成をワーカースレッド上で実行する。"""
+        try:
+            result = process_documents(
+                self._options,
+                self.progress.emit,
+                self.is_cancel_requested,
+            )
+        except ProcessingCancelled:
+            self.cancelled.emit()
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.finished.emit(result)
+
+    def cancel(self):
+        """UIスレッドから呼ばれる中止要求。"""
+        self._cancel_requested = True
+
+    def is_cancel_requested(self):
+        return self._cancel_requested
 
 
 class PDFSnipper(QMainWindow):
@@ -50,6 +101,10 @@ class PDFSnipper(QMainWindow):
         self._author_was_edited = False
         self._preview_global_page_index = 0
         self._preview_total_page_count = 0
+        self._cover_image_path = ""
+        self._processing_thread = None
+        self._processing_worker = None
+        self._cancel_requested = False
         self._build_ui()
 
     def _build_ui(self):
@@ -104,8 +159,8 @@ class PDFSnipper(QMainWindow):
         self._update_preview_controls()
 
     def _build_file_group(self):
-        """PDF追加、解除、並び替え用のUIグループを作る。"""
-        self.btn_select = QPushButton("PDFファイルを追加")
+        """PDF / 画像の追加、解除、並び替え用のUIグループを作る。"""
+        self.btn_select = QPushButton("PDF / 画像を追加")
         self.btn_select.clicked.connect(self.select_files)
 
         self.btn_remove = QPushButton("選択したファイルを解除")
@@ -127,29 +182,22 @@ class PDFSnipper(QMainWindow):
     def _build_preview_button(self, label, offset):
         """プレビューページ移動ボタンを作る。"""
         button = QPushButton(label)
-        button.setFixedSize(40, 20)
         button.setAutoRepeat(True)
         button.setAutoRepeatDelay(300)
         button.setAutoRepeatInterval(120)
         button.clicked.connect(lambda: self.change_preview_page(offset))
-        button.setStyleSheet("""
-            QPushButton {
-                background-color: #D8D8D8;
-                color: black;
-            }
-            """)
         return button
 
     def _build_crop_group(self):
         """スキャン種別と切り抜き範囲指定用のUIグループを作る。"""
-        self.radio_mode_spread = QRadioButton("見開き")
-        self.radio_mode_two_page = QRadioButton("左右分割")
-        self.radio_mode_spread.setChecked(True)
+        self.radio_mode_single_page = QRadioButton("シングルページ")
+        self.radio_mode_two_page = QRadioButton("2ページ")
+        self.radio_mode_single_page.setChecked(True)
         self.selection_mode_group = self._button_group(
-            self.radio_mode_spread,
+            self.radio_mode_single_page,
             self.radio_mode_two_page,
         )
-        self.radio_mode_spread.toggled.connect(self.update_selection_mode)
+        self.radio_mode_single_page.toggled.connect(self.update_selection_mode)
         self.radio_mode_two_page.toggled.connect(self.update_selection_mode)
 
         self.aspect_ratio_combo = QComboBox()
@@ -161,7 +209,7 @@ class PDFSnipper(QMainWindow):
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel("切り抜きモード:"))
-        layout.addWidget(self.radio_mode_spread)
+        layout.addWidget(self.radio_mode_single_page)
         layout.addWidget(self.radio_mode_two_page)
         layout.addWidget(QLabel("アスペクト比:"))
         layout.addWidget(self.aspect_ratio_combo)
@@ -196,7 +244,16 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_ltr,
             self.radio_epub_rtl,
         )
+        self.radio_pdf.toggled.connect(self._update_cover_image_controls)
+        self.radio_epub_ltr.toggled.connect(self._update_cover_image_controls)
+        self.radio_epub_rtl.toggled.connect(self._update_cover_image_controls)
         self.check_ocr = QCheckBox("OCR（処理に時間がかかります）")
+
+        self.cover_image_title_label = QLabel("表紙:")
+        self.btn_select_cover = QPushButton("表紙画像を選択")
+        self.btn_select_cover.clicked.connect(self.select_cover_image)
+        self.cover_image_label = QLabel()
+        self.cover_image_label.setWordWrap(True)
 
         self.filename_input = QLineEdit()
         self.filename_input.textEdited.connect(
@@ -223,6 +280,9 @@ class PDFSnipper(QMainWindow):
             self.radio_epub_ltr,
             self.radio_epub_rtl,
             self.check_ocr,
+            self.cover_image_title_label,
+            self.btn_select_cover,
+            self.cover_image_label,
             QLabel("ファイル名:"),
             self.filename_input,
             QLabel("著者:"),
@@ -230,27 +290,19 @@ class PDFSnipper(QMainWindow):
         ):
             layout.addWidget(widget)
 
+        self._update_cover_image_controls()
         return self._group_box("出力オプション", layout)
 
     def _build_execution_group(self):
         """実行ボタン、進捗バー、状態メッセージのUIグループを作る。"""
         self.btn_run = QPushButton("実行")
         self.btn_run.setFixedHeight(50)
-        self.btn_run.setStyleSheet("""
-            QPushButton {
-                background-color: #007AFF;
-                color: white;
-            }
-            QPushButton:disabled {
-                background-color: #b8b8b8;
-                color: #f2f2f2;
-            }
-            """)
-        self.btn_run.clicked.connect(self.process_pdf)
+        self.btn_run.clicked.connect(self._on_run_button_clicked)
+        self._set_run_button_style(is_processing=False)
 
         self.progress = QProgressBar()
         self._reset_progress()
-        self.status_log = QLabel("待機中")
+        self.status_log = QLabel(STATUS_IDLE)
 
         layout = QVBoxLayout()
         layout.addWidget(self.btn_run)
@@ -259,9 +311,12 @@ class PDFSnipper(QMainWindow):
         return self._group_box("実行", layout)
 
     def select_files(self):
-        """ファイルダイアログで選ばれたPDFを一覧へ追加する。"""
+        """ファイルダイアログで選ばれたPDF / 画像を一覧へ追加する。"""
         files, _ = QFileDialog.getOpenFileNames(
-            self, "PDFを選択", "", "PDF Files (*.pdf)"
+            self,
+            "PDF / 画像を選択",
+            "",
+            "Documents and Images (*.pdf *.png *.jpg *.jpeg);;PDF Files (*.pdf);;Image Files (*.png *.jpg *.jpeg)",
         )
         is_first_add = self.file_list.count() == 0
         for file_path in sorted(files):
@@ -271,14 +326,25 @@ class PDFSnipper(QMainWindow):
             self._autofill_output_metadata()
             self.refresh_preview(reset_page=is_first_add)
 
+    def select_cover_image(self):
+        """EPUB表紙として埋め込む画像を選択する。キャンセル時は選択を解除する。"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "表紙画像を選択",
+            "",
+            "Image Files (*.png *.jpg *.jpeg)",
+        )
+        self._cover_image_path = file_path or ""
+        self._update_cover_image_controls()
+
     def remove_selected_files(self):
-        """一覧で選択中のPDFを処理対象から外す。"""
+        """一覧で選択中のファイルを処理対象から外す。"""
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
         self.refresh_preview(reset_page=False)
 
     def refresh_preview(self, reset_page=False):
-        """複合PDFのグローバルページを切り抜き用プレビューへ表示する。"""
+        """複合入力のグローバルページを切り抜き用プレビューへ表示する。"""
         if self.file_list.count() == 0:
             self.canvas.clear()
             self.canvas.clear_selection()
@@ -307,7 +373,7 @@ class PDFSnipper(QMainWindow):
         self._update_preview_controls()
 
     def _collect_file_page_offsets(self):
-        """全ファイルのページオフセットと総ページ数を返す。"""
+        """全入力のページオフセットと総ページ数を返す。"""
         offsets = [0]
         total_pages = 0
         for i in range(self.file_list.count()):
@@ -364,12 +430,12 @@ class PDFSnipper(QMainWindow):
         self.refresh_preview()
 
     def update_selection_mode(self, checked):
-        """見開き・2P設定を選択ウィジェットへ反映する。"""
+        """1P・2P設定を選択ウィジェットへ反映する。"""
         if not checked:
             return
         mode = (
-            SELECTION_SPREAD
-            if self.radio_mode_spread.isChecked()
+            SELECTION_SINGLE_PAGE
+            if self.radio_mode_single_page.isChecked()
             else SELECTION_TWO_PAGE
         )
         self.canvas.set_selection_mode(mode)
@@ -400,6 +466,8 @@ class PDFSnipper(QMainWindow):
 
     def process_pdf(self):
         """入力検証後に保存先を選び、PDF/EPUB生成処理を実行する。"""
+        if self._processing_thread is not None:
+            return
         if not self._validate_inputs():
             return
 
@@ -421,22 +489,83 @@ class PDFSnipper(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
 
+        self._cancel_requested = False
         self._set_processing_state(True)
-        try:
-            result = process_documents(options, self._update_file_progress)
-            self._set_progress_value(result.page_count, result.page_count)
-            message = f"保存完了:\n{result.output_path}"
-            self.status_log.setText(f"完了: {result.file_size_mb:.2f} MB")
-            QMessageBox.information(self, "完了", message)
-        except Exception as e:
-            self._reset_progress()
-            self.status_log.setText("エラー")
-            QMessageBox.critical(self, "エラー", f"処理中にエラーが発生しました:\n{e}")
-        finally:
-            self._set_processing_state(False)
+        self._start_processing_worker(options)
+
+    def _on_run_button_clicked(self):
+        """状態に応じて処理開始または中止要求を行う。"""
+        if self._processing_thread is None:
+            self.process_pdf()
+        else:
+            self.cancel_processing()
+
+    def cancel_processing(self):
+        """実行中の変換処理へ中止を要求する。"""
+        if self._processing_worker is None:
+            return
+        self._cancel_requested = True
+        self._processing_worker.cancel()
+        self.btn_run.setEnabled(False)
+
+    def _start_processing_worker(self, options):
+        """変換処理をUIスレッドから切り離して開始する。"""
+        self._processing_thread = QThread(self)
+        self._processing_worker = ProcessingWorker(options)
+        self._processing_worker.moveToThread(self._processing_thread)
+
+        self._processing_thread.started.connect(self._processing_worker.run)
+        self._processing_worker.progress.connect(self._update_file_progress)
+        self._processing_worker.finished.connect(self._on_processing_finished)
+        self._processing_worker.failed.connect(self._on_processing_failed)
+        self._processing_worker.cancelled.connect(self._on_processing_cancelled)
+
+        for signal in (
+            self._processing_worker.finished,
+            self._processing_worker.failed,
+            self._processing_worker.cancelled,
+        ):
+            signal.connect(self._processing_thread.quit)
+            signal.connect(self._processing_worker.deleteLater)
+
+        self._processing_thread.finished.connect(self._processing_thread.deleteLater)
+        self._processing_thread.finished.connect(self._clear_processing_worker)
+        self._processing_thread.start()
+
+    @Slot(object)
+    def _on_processing_finished(self, result):
+        """処理完了時のUI更新を行う。"""
+        self._set_progress_value(result.page_count, result.page_count)
+        message = f"保存完了:\n{result.output_path}"
+        self._set_status(STATUS_COMPLETE, file_size_mb=result.file_size_mb)
+        QMessageBox.information(self, "完了", message)
+        self._set_processing_state(False)
+
+    @Slot(str)
+    def _on_processing_failed(self, message):
+        """処理失敗時のUI更新を行う。"""
+        self._reset_progress()
+        self._set_status(STATUS_ERROR)
+        QMessageBox.critical(
+            self, "エラー", f"処理中にエラーが発生しました:\n{message}"
+        )
+        self._set_processing_state(False)
+
+    @Slot()
+    def _on_processing_cancelled(self):
+        """中止完了時のUI更新を行う。ダイアログは表示しない。"""
+        self._reset_progress()
+        self._set_status(STATUS_IDLE)
+        self._set_processing_state(False)
+
+    @Slot()
+    def _clear_processing_worker(self):
+        """完了後にワーカー参照を破棄する。"""
+        self._processing_thread = None
+        self._processing_worker = None
 
     def _validate_inputs(self):
-        """実行に必要なPDF、切り抜き範囲、プレビューの有無を確認する。"""
+        """実行に必要な入力、切り抜き範囲、プレビューの有無を確認する。"""
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "エラー", "ファイルを選択してください")
             return False
@@ -445,6 +574,19 @@ class PDFSnipper(QMainWindow):
             return False
         if self.canvas.pixmap().isNull():
             QMessageBox.warning(self, "エラー", "プレビュー画像を読み込めませんでした")
+            return False
+        if self.check_ocr.isChecked() and not self._ocr_command():
+            message_box = QMessageBox(self)
+            message_box.setIcon(QMessageBox.Critical)
+            message_box.setWindowTitle("NDLOCR-Liteが見つかりません")
+            message_box.setText("NDLOCR-Liteが見つからないため、OCRを実行できません。")
+            message_box.setStandardButtons(QMessageBox.Ok | QMessageBox.Help)
+            if message_box.exec() == QMessageBox.Help:
+                QDesktopServices.openUrl(
+                    QUrl(
+                        "https://github.com/h1toiui/pdf-snipper-for-ndl#OCRのセットアップ"
+                    )
+                )
             return False
         return True
 
@@ -472,7 +614,20 @@ class PDFSnipper(QMainWindow):
             image_processing=self._selected_image_processing(),
             ocr_text_output=self.check_ocr.isChecked(),
             ocr_command=self._ocr_command(),
+            cover_image_path=(
+                self._cover_image_path if output_format == OUTPUT_EPUB else ""
+            ),
         )
+
+    def _update_cover_image_controls(self, *args):
+        """EPUB選択中だけ表紙画像UIを表示し、選択済みパスを表示する。"""
+        is_epub = not self.radio_pdf.isChecked()
+        self.cover_image_title_label.setVisible(is_epub)
+        self.btn_select_cover.setVisible(is_epub)
+        has_cover = bool(self._cover_image_path)
+        self.cover_image_label.setVisible(is_epub and has_cover)
+        if has_cover:
+            self.cover_image_label.setText(f"✔︎ {self._cover_image_path}")
 
     def _selected_image_processing(self):
         """UIで選択された画像処理モードを返す。"""
@@ -489,28 +644,67 @@ class PDFSnipper(QMainWindow):
         return 48
 
     def _file_paths(self):
-        """一覧に並んでいるPDFパスを表示順で返す。"""
+        """一覧に並んでいるファイルパスを表示順で返す。"""
         return [
             self.file_list.item(i).data(Qt.UserRole)
             for i in range(self.file_list.count())
         ]
 
     def _ocr_command(self):
-        """環境変数、ローカルvenv、PATHの順にNDLOCR-Liteコマンドを探す。"""
+        """環境変数、アプリ横のOCR環境、PATHの順にNDLOCR-Liteコマンドを探す。"""
         env_command = os.environ.get("NDLOCR_LITE_COMMAND")
-        if env_command:
+        if env_command and self._is_available_command(env_command):
             return env_command
 
-        app_dir = os.path.dirname(os.path.abspath(__file__))
-        local_command = os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite")
-        if os.path.exists(local_command):
-            return local_command
+        for local_command in self._local_ocr_command_candidates():
+            if os.path.exists(local_command):
+                return local_command
 
         resolved = shutil.which("ndlocr-lite")
-        return resolved or "ndlocr-lite"
+        if resolved:
+            return resolved
+        resolved = shutil.which("ndlocr-lite.exe")
+        return resolved or ""
+
+    def _local_ocr_command_candidates(self):
+        """macOS/Linux/Windowsで使うアプリ横のOCRコマンド候補を返す。"""
+        app_dir = self._application_dir()
+        return [
+            os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite"),
+            os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite.exe"),
+            os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite"),
+            os.path.join(app_dir, "ocr-runtime", "bin", "ndlocr-lite"),
+            os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite.exe"),
+            os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite"),
+        ]
+
+    @staticmethod
+    def _application_dir():
+        """PyInstaller実行時は実行ファイルの隣、開発時はソースの場所を返す。"""
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.abspath(__file__))
+
+    @staticmethod
+    def _is_available_command(command):
+        """環境変数に指定されたコマンド文字列の実行ファイル部分を確認する。"""
+        try:
+            args = shlex.split(command, posix=os.name != "nt")
+        except ValueError:
+            return False
+        if not args:
+            return False
+
+        executable = args[0]
+        has_path_separator = os.sep in executable or (
+            os.altsep is not None and os.altsep in executable
+        )
+        if has_path_separator:
+            return os.path.exists(executable)
+        return shutil.which(executable) is not None
 
     def _add_file(self, file_path):
-        """PDFパスを表示名付きのリスト項目として追加する。"""
+        """ファイルパスを表示名付きのリスト項目として追加する。"""
         count = self.file_list.count() + 1
         display_text = f"{count}. {os.path.basename(file_path)}"
         item = QListWidgetItem(display_text)
@@ -530,7 +724,7 @@ class PDFSnipper(QMainWindow):
             item.setText(display_text)
 
     def _autofill_output_metadata(self):
-        """先頭PDFのメタデータからタイトルと著者を未編集欄へ自動入力する。"""
+        """先頭ファイルのメタデータからタイトルと著者を未編集欄へ自動入力する。"""
         if self.file_list.count() == 0:
             return
 
@@ -558,37 +752,56 @@ class PDFSnipper(QMainWindow):
 
     def _update_file_progress(self, stage, current, total):
         """処理本体から通知された段階に応じて進捗表示を更新する。"""
+        if self._cancel_requested:
+            return
+        status_template = STATUS_PROGRESS_MESSAGES.get(
+            stage, STATUS_PROGRESS_MESSAGES["default"]
+        )
         if stage == "prepare":
             self._set_progress_value(0, total)
-            self.status_log.setText(f"処理準備中: 0 / {total} ページ")
         elif stage == "render":
             self._set_progress_value(current, total)
-            self.status_log.setText(f"ページ画像を生成中: {current} / {total} ページ")
         elif stage == "ocr":
             self._set_busy_progress()
-            self.status_log.setText("OCR処理中: NDLOCR-Liteの完了を待っています")
         elif stage == "ocr_done":
             self._set_progress_value(current, total)
-            self.status_log.setText(f"OCR完了: {current} / {total} ページ")
         elif stage == "embed":
             self._set_progress_value(current, total)
-            self.status_log.setText("OCRテキストを埋め込み中")
         elif stage == "save":
             self._set_progress_value(current, total)
-            self.status_log.setText("ファイル保存中")
         else:
             self._set_progress_value(current, total)
-            self.status_log.setText(f"処理中: {current} / {total}")
+        self._set_status(status_template, current=current, total=total)
         self.progress.repaint()
         self.status_log.repaint()
-        QApplication.processEvents()
 
     def _set_processing_state(self, is_processing):
         """実行中かどうかに応じてボタンと初期メッセージを切り替える。"""
-        self.btn_run.setEnabled(not is_processing)
+        self.btn_run.setEnabled(True)
+        self.btn_run.setText("実行中止" if is_processing else "実行")
+        self._set_run_button_style(is_processing)
         if is_processing:
             self._set_busy_progress()
-            self.status_log.setText("処理を開始しています")
+            self._set_status(STATUS_STARTING)
+
+    def _set_status(self, template, **values):
+        """ステータス表示を一元的に更新する。"""
+        self.status_log.setText(template.format(**values))
+
+    def _set_run_button_style(self, is_processing):
+        """実行ボタンの通常時/処理中の見た目を切り替える。"""
+        background_color = "#a9a9a9" if is_processing else "#007AFF"
+        disabled_color = "#a9a9a9" if is_processing else "#b8b8b8"
+        self.btn_run.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {background_color};
+                color: white;
+            }}
+            QPushButton:disabled {{
+                background-color: {disabled_color};
+                color: #f2f2f2;
+            }}
+            """)
 
     def _reset_progress(self):
         """プログレスバーを待機時の空表示へ戻す。"""

@@ -2,7 +2,7 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QCursor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QLabel
 
-SELECTION_SPREAD = "spread"
+SELECTION_SINGLE_PAGE = "single_page"
 SELECTION_TWO_PAGE = "two_page"
 
 HANDLE_LEFT = "left"
@@ -22,6 +22,11 @@ RIGHT_HANDLES = {HANDLE_RIGHT, HANDLE_TOP_RIGHT, HANDLE_BOTTOM_RIGHT}
 TOP_HANDLES = {HANDLE_TOP, HANDLE_TOP_LEFT, HANDLE_TOP_RIGHT}
 BOTTOM_HANDLES = {HANDLE_BOTTOM, HANDLE_BOTTOM_LEFT, HANDLE_BOTTOM_RIGHT}
 
+RESIZE_FREE = "free"
+RESIZE_FREE_SYNC = "free_sync"
+RESIZE_FIXED = "fixed"
+RESIZE_FIXED_SYNC = "fixed_sync"
+
 
 class SelectionLabel(QLabel):
     """画像上で移動・リサイズ可能な切り抜き矩形を管理する。"""
@@ -32,7 +37,7 @@ class SelectionLabel(QLabel):
         self.zoom = 1.0
         self.rect_p1 = QRect()
         self.rect_p2 = QRect()
-        self.selection_mode = SELECTION_SPREAD
+        self.selection_mode = SELECTION_SINGLE_PAGE
         self.aspect_ratio = None
         self.source_aspect_ratio = 1.0
         self._operation = None
@@ -44,26 +49,12 @@ class SelectionLabel(QLabel):
 
     def setPixmap(self, pixmap):
         """プレビュー画像を設定し、選択枠を新しい画像寸法へ追従させる。"""
-        old_width = self._pixmap.width()
-        old_height = self._pixmap.height()
         self._pixmap = QPixmap(pixmap)
         self.zoom = 1.0
 
-        if old_width > 0 and old_height > 0:
-            self.rect_p1 = self._scaled_rect(
-                self.rect_p1,
-                old_width,
-                old_height,
-                self._pixmap.width(),
-                self._pixmap.height(),
-            )
-            self.rect_p2 = self._scaled_rect(
-                self.rect_p2,
-                old_width,
-                old_height,
-                self._pixmap.width(),
-                self._pixmap.height(),
-            )
+        if not self._pixmap.isNull():
+            self.rect_p1 = self._fit_rect_to_image(self.rect_p1)
+            self.rect_p2 = self._fit_rect_to_image(self.rect_p2)
         if not self._pixmap.isNull() and not self.selected_rects():
             self._create_initial_selection()
         self.update()
@@ -87,8 +78,8 @@ class SelectionLabel(QLabel):
         return max(1, self._pixmap.height())
 
     def set_selection_mode(self, mode):
-        """見開きまたは2Pへ切り替え、既存の選択枠を破棄する。"""
-        if mode not in (SELECTION_SPREAD, SELECTION_TWO_PAGE):
+        """シングルページまたは2ページへ切り替え、既存の選択枠を破棄する。"""
+        if mode not in (SELECTION_SINGLE_PAGE, SELECTION_TWO_PAGE):
             raise ValueError(f"Unsupported selection mode: {mode}")
         if self.selection_mode == mode:
             return
@@ -145,14 +136,8 @@ class SelectionLabel(QLabel):
         if self._operation == "move":
             rect = self._moved_rect(image_pos)
             self._set_rect_by_name(self._active_rect_name, rect)
-        elif self.aspect_ratio is None:
-            rect = self._freely_resized_rect(image_pos)
-            self._set_rect_by_name(self._active_rect_name, rect)
-        elif self._should_sync_two_page_size():
-            self._apply_synced_fixed_ratio_resize(image_pos)
         else:
-            rect = self._fixed_ratio_resized_rect(image_pos)
-            self._set_rect_by_name(self._active_rect_name, rect)
+            self._apply_resize_drag(image_pos, event.modifiers())
         self.update()
 
     def mouseReleaseEvent(self, event):
@@ -179,7 +164,7 @@ class SelectionLabel(QLabel):
 
     def selected_rects(self):
         """現在の選択モードで有効な切り抜き矩形を返す。"""
-        if self.selection_mode == SELECTION_SPREAD:
+        if self.selection_mode == SELECTION_SINGLE_PAGE:
             return [self.rect_p1] if not self.rect_p1.isNull() else []
         return [rect for rect in (self.rect_p1, self.rect_p2) if not rect.isNull()]
 
@@ -206,7 +191,7 @@ class SelectionLabel(QLabel):
         image_height = self.image_height()
         gap = max(8, round(image_width * 0.02))
 
-        if self.selection_mode == SELECTION_SPREAD:
+        if self.selection_mode == SELECTION_SINGLE_PAGE:
             width, height = self._initial_size(image_width, image_height, image_width)
             self.rect_p1 = self._centered_rect(width, height, image_width / 2)
             self.rect_p2 = QRect()
@@ -274,20 +259,6 @@ class SelectionLabel(QLabel):
             min(self.image_height(), y1),
         )
 
-    def _fixed_ratio_resized_rect(self, image_pos):
-        width, height = self._fixed_ratio_size_from_drag(image_pos)
-        width, height = self._bounded_fixed_ratio_size(
-            width,
-            height,
-            self._drag_start_rect,
-        )
-        return self._anchored_rect_from_reference(
-            self._drag_start_rect,
-            width,
-            height,
-            self._active_handle,
-        )
-
     def _fixed_ratio_size_from_drag(self, image_pos):
         ratio = self.aspect_ratio
         x0, y0, x1, y1 = self._rect_bounds(self._drag_start_rect)
@@ -308,14 +279,47 @@ class SelectionLabel(QLabel):
             )
         return height * ratio, height
 
-    def _apply_synced_fixed_ratio_resize(self, image_pos):
-        width, height = self._fixed_ratio_size_from_drag(image_pos)
-        width, height = self._bounded_fixed_ratio_size(
+    def _apply_resize_drag(self, image_pos, modifiers):
+        """リサイズ経路の入口。モード判定、サイズ算出、反映をここで束ねる。"""
+        mode = self._resize_mode(modifiers)
+        if mode == RESIZE_FREE:
+            rect = self._freely_resized_rect(image_pos)
+            self._set_rect_by_name(self._active_rect_name, rect)
+            return
+
+        width, height = self._resize_size_from_drag(image_pos, mode)
+        width, height = self._bounded_resize_size(
             width,
             height,
-            self._drag_start_rect,
-            self._other_active_rect(),
+            preserve_ratio=mode in (RESIZE_FIXED, RESIZE_FIXED_SYNC),
+            synchronize=mode in (RESIZE_FREE_SYNC, RESIZE_FIXED_SYNC),
         )
+        self._apply_resized_size(
+            width,
+            height,
+            synchronize=mode in (RESIZE_FREE_SYNC, RESIZE_FIXED_SYNC),
+        )
+
+    def _resize_mode(self, modifiers):
+        """現在の設定と修飾キーから、どのリサイズ経路を通すかを決める。"""
+        if self.aspect_ratio is None:
+            if self._should_sync_free_resize(modifiers):
+                return RESIZE_FREE_SYNC
+            return RESIZE_FREE
+        if self._should_sync_two_page_size():
+            return RESIZE_FIXED_SYNC
+        return RESIZE_FIXED
+
+    def _resize_size_from_drag(self, image_pos, mode):
+        """各モード固有の方法で、最終適用前の width/height を求める。"""
+        if mode in (RESIZE_FIXED, RESIZE_FIXED_SYNC):
+            return self._fixed_ratio_size_from_drag(image_pos)
+
+        rect = self._freely_resized_rect(image_pos)
+        return rect.width(), rect.height()
+
+    def _apply_resized_size(self, width, height, synchronize=False):
+        """算出済みサイズをアクティブ枠へ反映し、必要なら相手枠にも同期する。"""
         self._set_rect_by_name(
             self._active_rect_name,
             self._anchored_rect_from_reference(
@@ -325,7 +329,8 @@ class SelectionLabel(QLabel):
                 self._active_handle,
             ),
         )
-        self._sync_other_rect_size(width, height)
+        if synchronize:
+            self._sync_other_rect_size(width, height)
 
     def _draw_selection(self, painter, image_rect, color, label):
         if image_rect.isNull():
@@ -345,7 +350,7 @@ class SelectionLabel(QLabel):
         painter.setBrush(Qt.NoBrush)
 
     def _page1_label(self):
-        return "Page" if self.selection_mode == SELECTION_SPREAD else "Page 1"
+        return "Page" if self.selection_mode == SELECTION_SINGLE_PAGE else "Page 1"
 
     def _hit_test(self, widget_pos):
         for name, image_rect in reversed(self._selection_items()):
@@ -396,6 +401,14 @@ class SelectionLabel(QLabel):
             self._operation == "resize"
             and self.selection_mode == SELECTION_TWO_PAGE
             and self.aspect_ratio is not None
+        )
+
+    def _should_sync_free_resize(self, modifiers):
+        return (
+            self._operation == "resize"
+            and self.selection_mode == SELECTION_TWO_PAGE
+            and self.aspect_ratio is None
+            and bool(modifiers & Qt.ShiftModifier)
         )
 
     def _sync_other_rect_size(self, width, height):
@@ -550,6 +563,22 @@ class SelectionLabel(QLabel):
         new_y0, new_y1 = cls._anchored_bounds(anchor_y, height, y_mode)
         return cls._rect_from_bounds(new_x0, new_y0, new_x1, new_y1)
 
+    def _bounded_resize_size(
+        self,
+        width,
+        height,
+        preserve_ratio,
+        synchronize,
+    ):
+        """画像外にはみ出さないサイズへ補正する。同期時は相手枠の制約も見る。"""
+        rects = [self._drag_start_rect]
+        if synchronize:
+            rects.append(self._other_active_rect())
+
+        if preserve_ratio:
+            return self._bounded_fixed_ratio_size(width, height, *rects)
+        return self._bounded_size(width, height, *rects)
+
     def _bounded_fixed_ratio_size(self, width, height, *rects):
         max_scale = 1.0
         for rect in rects:
@@ -570,6 +599,20 @@ class SelectionLabel(QLabel):
         return max(MIN_SELECTION_SIZE, width * max_scale), max(
             MIN_SELECTION_SIZE, height * max_scale
         )
+
+    def _bounded_size(self, width, height, *rects):
+        max_width = width
+        max_height = height
+        for rect in rects:
+            if rect.isNull():
+                continue
+            rect_max_width, rect_max_height = self._max_fixed_ratio_size_for_rect(
+                rect,
+                self._active_handle,
+            )
+            max_width = min(max_width, rect_max_width)
+            max_height = min(max_height, rect_max_height)
+        return max(MIN_SELECTION_SIZE, max_width), max(MIN_SELECTION_SIZE, max_height)
 
     def _max_fixed_ratio_size_for_rect(self, rect, handle):
         x0, y0, x1, y1 = self._rect_bounds(rect)
@@ -594,13 +637,23 @@ class SelectionLabel(QLabel):
     def _rect_from_bounds(x0, y0, x1, y1):
         return QRect(round(x0), round(y0), round(x1 - x0), round(y1 - y0))
 
-    @staticmethod
-    def _scaled_rect(rect, old_width, old_height, new_width, new_height):
+    def _fit_rect_to_image(self, rect):
+        """ページ移動時、既存枠をリセットせず現在画像内へ収める。"""
         if rect.isNull():
             return QRect()
-        return QRect(
-            round(rect.x() * new_width / old_width),
-            round(rect.y() * new_height / old_height),
-            round(rect.width() * new_width / old_width),
-            round(rect.height() * new_height / old_height),
-        )
+
+        image_width = self.image_width()
+        image_height = self.image_height()
+        width = max(MIN_SELECTION_SIZE, rect.width())
+        height = max(MIN_SELECTION_SIZE, rect.height())
+
+        if width > image_width or height > image_height:
+            scale = min(image_width / max(1, width), image_height / max(1, height))
+            width = max(1, round(width * scale))
+            height = max(1, round(height * scale))
+
+        width = min(width, image_width)
+        height = min(height, image_height)
+        x = min(max(0, rect.x()), max(0, image_width - width))
+        y = min(max(0, rect.y()), max(0, image_height - height))
+        return QRect(round(x), round(y), round(width), round(height))

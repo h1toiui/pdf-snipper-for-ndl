@@ -1,8 +1,18 @@
-import fitz
 import cv2
+import fitz
 import numpy as np
 
 from models import IMAGE_PROCESS_ENHANCE, IMAGE_PROCESS_NONE
+
+# 白黒二極化の調整値。紙地の黒ドットが出る場合は、まずここを調整する。
+# 1. グレースケール化
+# 2. ページ内の明るい側 84% 点を「紙色」として推定
+# 3. その紙色が 230 になるように全体を明るくする
+# 4. 固定しきい値 170 で二値化
+
+PAPER_WHITE_PERCENTILE = 84
+TARGET_PAPER_WHITE = 230
+BINARY_THRESHOLD = 170
 
 
 def apply_image_processing(pixmap: fitz.Pixmap, mode: str) -> fitz.Pixmap:
@@ -20,11 +30,11 @@ def enhance_for_ereader(pixmap: fitz.Pixmap) -> fitz.Pixmap:
     # 以降の処理は濃淡だけを見ればよいので、最初にグレースケールへ揃える。
     gray = _pixmap_to_gray_array(pixmap)
 
-    # 中央付近の明るい紙面を背景白として推定し、ページ全体の明るさを揃える。
-    normalized = _flatten_background(gray)
+    # 紙色を白側へ寄せてから二値化する。
+    brightened = _brighten_paper(gray)
 
     # 白黒へ二極化する。出力サイズも小さくなりやすい。
-    binary = _binarize(normalized)
+    binary = _binarize(brightened)
     return _gray_array_to_pixmap(binary)
 
 
@@ -46,31 +56,23 @@ def _pixmap_to_gray_array(pixmap: fitz.Pixmap):
     return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
 
-def _flatten_background(gray):
-    """中央付近の明るい画素を背景白として推定し、紙色を白へ寄せる。"""
-    height, width = gray.shape[:2]
-    y_margin = height // 5
-    x_margin = width // 5
-    center = gray[y_margin : height - y_margin, x_margin : width - x_margin]
-    if center.size == 0:
-        center = gray
-
-    background_level = max(1.0, float(np.percentile(center, 95)))
-    normalized = gray.astype(np.float32) * (255.0 / background_level)
-    return np.clip(normalized, 0, 255).astype(np.uint8)
+def _brighten_paper(gray):
+    """推定した紙色が目標の白さになるよう、二値化前に明るくする。"""
+    estimated_paper = np.percentile(gray, PAPER_WHITE_PERCENTILE)
+    bias = max(0, TARGET_PAPER_WHITE - estimated_paper)
+    brightened = gray.astype(np.float32) + bias
+    return np.clip(brightened, 0, 255).astype(np.uint8)
 
 
 def _binarize(gray):
-    """ページ全体ではなく近傍の明るさを基準に白黒へ分ける。"""
-    block_size = _odd_kernel_size(gray.shape, ratio=0.02, minimum=35)
-    return cv2.adaptiveThreshold(
+    """背景補正後の明るさを固定しきい値で白黒へ分ける。"""
+    _, binary = cv2.threshold(
         gray,
+        BINARY_THRESHOLD,
         255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
-        block_size,
-        11,
     )
+    return binary
 
 
 def _gray_array_to_pixmap(gray):
@@ -79,12 +81,3 @@ def _gray_array_to_pixmap(gray):
     if not ok:
         raise ValueError("Failed to encode enhanced image")
     return fitz.Pixmap(buffer.tobytes())
-
-
-def _odd_kernel_size(shape, ratio, minimum):
-    """OpenCVのぼかし・二値化で必要な奇数サイズを画像寸法から決める。"""
-    shortest_side = max(1, min(shape[:2]))
-    size = max(minimum, int(shortest_side * ratio))
-    if size % 2 == 0:
-        size += 1
-    return size

@@ -2,11 +2,20 @@ import uuid
 import zipfile
 from datetime import datetime
 from html import escape
+from pathlib import Path
 
 import fitz
 
 
-def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
+def save_as_epub(
+    path,
+    images,
+    title,
+    direction,
+    ocr_pages=None,
+    author="",
+    cover_image_path="",
+):
     """画像リストと書誌情報をEPUB 3.0形式で保存する。"""
     pub_id = str(uuid.uuid4())
     mod_time = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -16,6 +25,7 @@ def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
         f"\n    <dc:creator>{safe_author}</dc:creator>" if safe_author else ""
     )
     ocr_pages = ocr_pages or []
+    cover_image = _cover_image_item(cover_image_path)
 
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(
@@ -38,6 +48,23 @@ def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
 
         manifest_items = []
         spine_items = []
+        metadata_items = []
+        if cover_image is not None:
+            cover_image_name, cover_media_type, cover_data, cover_width, cover_height = (
+                cover_image
+            )
+            zf.writestr(f"OEBPS/Images/{cover_image_name}", cover_data)
+            cover_html = _cover_xhtml(cover_image_name, cover_width, cover_height)
+            zf.writestr("OEBPS/Text/cover.xhtml", cover_html)
+            metadata_items.append('<meta name="cover" content="cover-image"/>')
+            manifest_items.append(
+                f'<item id="cover-image" href="Images/{cover_image_name}" media-type="{cover_media_type}" properties="cover-image"/>'
+            )
+            manifest_items.append(
+                '<item id="cover" href="Text/cover.xhtml" media-type="application/xhtml+xml" properties="svg"/>'
+            )
+            spine_items.append('<itemref idref="cover"/>')
+
         for i, img_data in enumerate(images):
             width, height = _image_size(img_data)
             img_name = f"img_{i:04d}.png"
@@ -69,6 +96,7 @@ def save_as_epub(path, images, title, direction, ocr_pages=None, author=""):
     <meta property="rendition:layout">pre-paginated</meta>
     <meta property="rendition:orientation">auto</meta>
     <meta property="rendition:spread">none</meta>
+    {''.join(metadata_items)}
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
@@ -104,6 +132,66 @@ def _image_size(image_data):
     """画像バイト列からEPUBページ用の幅と高さを取得する。"""
     pixmap = fitz.Pixmap(image_data)
     return pixmap.width, pixmap.height
+
+
+def _cover_image_item(cover_image_path):
+    """表紙画像パスからEPUBへ入れるファイル名、MIME、データ、寸法を返す。"""
+    if not cover_image_path:
+        return None
+
+    source_path = Path(cover_image_path)
+    suffix = source_path.suffix.lower()
+    media_types = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+    }
+    media_type = media_types.get(suffix)
+    if media_type is None:
+        raise ValueError("表紙画像はpng/jpgのみ指定できます")
+
+    image_data = source_path.read_bytes()
+    width, height = _image_size(image_data)
+    ext = ".jpg" if suffix == ".jpeg" else suffix
+    return f"cover{ext}", media_type, image_data, width, height
+
+
+def _cover_xhtml(img_name, width, height):
+    """EPUBリーダーが表紙として開ける画像ページを作る。"""
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Cover</title>
+  <meta name="viewport" content="width={width}, height={height}"/>
+  <style>
+    html, body {{
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      overflow: hidden;
+    }}
+    svg {{
+      display: block;
+      width: 100%;
+      height: 100%;
+    }}
+  </style>
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg"
+       xmlns:xlink="http://www.w3.org/1999/xlink"
+       version="1.1"
+       width="100%"
+       height="100%"
+       viewBox="0 0 {width} {height}"
+       preserveAspectRatio="xMidYMid meet">
+    <image width="{width}" height="{height}" href="../Images/{img_name}" xlink:href="../Images/{img_name}"/>
+  </svg>
+</body>
+</html>"""
 
 
 def _page_xhtml(index, img_name, width, height, ocr_page=None):
@@ -148,6 +236,9 @@ def _page_xhtml(index, img_name, width, height, ocr_page=None):
       overflow: hidden;
       white-space: nowrap;
       line-height: 1;
+      text-align: justify;
+      text-align-last: justify;
+      text-justify: inter-character;
     }}
     .ocr-line.vertical {{
       writing-mode: vertical-rl;

@@ -12,6 +12,10 @@ IMAGE_PROCESS_NONE = "none"
 IMAGE_PROCESS_ENHANCE = "enhance"
 
 
+class ProcessingCancelled(Exception):
+    """ユーザー操作によって処理が中止されたことを表す。"""
+
+
 @dataclass(frozen=True)
 class ProcessingOptions:
     file_paths: list[str]
@@ -28,6 +32,7 @@ class ProcessingOptions:
     image_processing: str = IMAGE_PROCESS_NONE
     ocr_text_output: bool = False
     ocr_command: str = "ndlocr-lite"
+    cover_image_path: str = ""
 
 
 @dataclass(frozen=True)

@@ -2,9 +2,13 @@ import json
 import os
 import shlex
 import subprocess
+import tempfile
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+
+from models import ProcessingCancelled
 
 TEXT_KEYS = {"text", "content", "contents", "string", "value"}
 
@@ -28,16 +32,48 @@ class OCRPage:
     text: str
 
 
-def run_ndlocr_lite(image_dir, output_dir, command="ndlocr-lite"):
+def run_ndlocr_lite(
+    image_dir,
+    output_dir,
+    command="ndlocr-lite",
+    is_cancel_requested=None,
+):
     """Run NDLOCR-Lite for a directory of cropped page images and return pages."""
     args = _build_command(command, image_dir, output_dir)
     try:
-        subprocess.run(
-            args,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        with (
+            tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout_file,
+            tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file,
+        ):
+            process = subprocess.Popen(
+                args,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                text=True,
+            )
+            while process.poll() is None:
+                if is_cancel_requested is not None and is_cancel_requested():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    raise ProcessingCancelled()
+                time.sleep(0.1)
+
+            stdout_file.seek(0)
+            stderr_file.seek(0)
+            stdout = stdout_file.read()
+            stderr = stderr_file.read()
+
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(
+                process.returncode,
+                args,
+                output=stdout,
+                stderr=stderr,
+            )
     except FileNotFoundError as exc:
         raise RuntimeError(
             "NDLOCR-Lite command was not found. Install ndlocr-lite or set "
@@ -52,7 +88,10 @@ def run_ndlocr_lite(image_dir, output_dir, command="ndlocr-lite"):
 
 def _build_command(command, image_dir, output_dir):
     """NDLOCR-Liteを呼び出すためのコマンド引数を組み立てる。"""
-    args = shlex.split(os.environ.get("NDLOCR_LITE_COMMAND", command))
+    args = shlex.split(
+        os.environ.get("NDLOCR_LITE_COMMAND", command),
+        posix=os.name != "nt",
+    )
     if not args:
         raise RuntimeError("NDLOCR-Lite command is empty.")
 

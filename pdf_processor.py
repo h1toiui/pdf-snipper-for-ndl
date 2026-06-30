@@ -5,7 +5,7 @@ from typing import Callable
 import fitz
 
 from image_processing import apply_image_processing
-from models import OUTPUT_PDF, ProcessingOptions, ProcessingResult
+from models import OUTPUT_PDF, ProcessingCancelled, ProcessingOptions, ProcessingResult
 from ocr_processor import run_ndlocr_lite
 from epub_writer import save_as_epub
 
@@ -26,6 +26,7 @@ def normalize_output_path(save_dir, filename, output_format):
 def process_documents(
     options: ProcessingOptions,
     on_progress: Callable[[str, int, int], None] | None = None,
+    is_cancel_requested: Callable[[], bool] | None = None,
 ) -> ProcessingResult:
     """指定されたPDF群を切り抜き、PDFまたはEPUBとして保存する。"""
     is_pdf = options.output_format == OUTPUT_PDF
@@ -37,6 +38,7 @@ def process_documents(
     crop_rects = [rect for rect in options.crop_rects if not rect.isNull()]
     total_pages = _count_output_pages(options.file_paths, len(crop_rects))
 
+    _raise_if_cancelled(is_cancel_requested)
     if on_progress is not None:
         on_progress("prepare", 0, total_pages)
 
@@ -51,6 +53,7 @@ def process_documents(
             with fitz.open(file_path) as doc:
                 for page in doc:
                     for q_rect in crop_rects:
+                        _raise_if_cancelled(is_cancel_requested)
                         pdf_rect = _qt_rect_to_pdf_rect(
                             q_rect,
                             page.rect.width,
@@ -91,28 +94,36 @@ def process_documents(
                         page_count += 1
                         if on_progress is not None:
                             on_progress("render", page_count, total_pages)
+                        _raise_if_cancelled(is_cancel_requested)
 
         if should_run_ocr:
+            _raise_if_cancelled(is_cancel_requested)
             if on_progress is not None:
                 on_progress("ocr", 0, 0)
             ocr_pages = run_ndlocr_lite(
                 ocr_image_dir,
                 ocr_result_dir,
                 options.ocr_command,
+                is_cancel_requested=is_cancel_requested,
             )
+            _raise_if_cancelled(is_cancel_requested)
             if on_progress is not None:
                 on_progress("ocr_done", total_pages, total_pages)
 
         if is_pdf:
             if should_run_ocr:
+                _raise_if_cancelled(is_cancel_requested)
                 if on_progress is not None:
                     on_progress("embed", total_pages, total_pages)
-                _embed_ocr_in_pdf(new_doc, ocr_pages)
+                _embed_ocr_in_pdf(new_doc, ocr_pages, is_cancel_requested)
             _set_pdf_metadata(new_doc, options.output_title, options.output_author)
+            _raise_if_cancelled(is_cancel_requested)
             if on_progress is not None:
                 on_progress("save", total_pages, total_pages)
             new_doc.save(options.output_path, garbage=3, deflate=True)
+            _raise_if_cancelled(is_cancel_requested)
         else:
+            _raise_if_cancelled(is_cancel_requested)
             if on_progress is not None:
                 on_progress("save", total_pages, total_pages)
             save_as_epub(
@@ -122,7 +133,9 @@ def process_documents(
                 options.epub_direction,
                 ocr_pages=ocr_pages,
                 author=options.output_author,
+                cover_image_path=options.cover_image_path,
             )
+            _raise_if_cancelled(is_cancel_requested)
 
         return ProcessingResult(
             output_path=options.output_path,
@@ -151,6 +164,12 @@ def _count_output_pages(file_paths, crop_count):
     return page_count
 
 
+def _raise_if_cancelled(is_cancel_requested):
+    """中止要求が出ていれば処理を停止する。"""
+    if is_cancel_requested is not None and is_cancel_requested():
+        raise ProcessingCancelled()
+
+
 def _qt_rect_to_pdf_rect(
     q_rect, page_width, page_height, viewport_width, viewport_height
 ):
@@ -165,9 +184,10 @@ def _qt_rect_to_pdf_rect(
     )
 
 
-def _embed_ocr_in_pdf(doc, ocr_pages):
+def _embed_ocr_in_pdf(doc, ocr_pages, is_cancel_requested=None):
     """OCR結果をPDF各ページの透明テキストレイヤーとして埋め込む。"""
     for page_index, ocr_page in enumerate(ocr_pages[: doc.page_count]):
+        _raise_if_cancelled(is_cancel_requested)
         page = doc[page_index]
         if not ocr_page.lines:
             continue
