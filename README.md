@@ -70,6 +70,8 @@ py -m venv .venv-ndlocr
 .venv-ndlocr\Scripts\python.exe -m pip install git+https://github.com/ndl-lab/ndlocr-lite.git
 ```
 
+Windowsで`DLL load failed`エラーが発生する場合は、最新の[Visual C++ 再頒布可能パッケージ](https://learn.microsoft.com/ja-jp/cpp/windows/latest-supported-vc-redist)をインストール後、再度お試しください。
+
 ## 使い方
 
 1. `PDF / 画像を追加` でPDFまたは画像を追加します。

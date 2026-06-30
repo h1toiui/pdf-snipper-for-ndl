@@ -620,14 +620,16 @@ class PDFSnipper(QMainWindow):
         )
 
     def _update_cover_image_controls(self, *args):
-        """EPUB選択中だけ表紙画像UIを表示し、選択済みパスを表示する。"""
+        """EPUB選択中だけ表紙画像UIを表示し、選択状態に応じて表示文言を切り替える。"""
         is_epub = not self.radio_pdf.isChecked()
         self.cover_image_title_label.setVisible(is_epub)
         self.btn_select_cover.setVisible(is_epub)
+        self.cover_image_label.setVisible(is_epub)
         has_cover = bool(self._cover_image_path)
-        self.cover_image_label.setVisible(is_epub and has_cover)
         if has_cover:
             self.cover_image_label.setText(f"✔︎ {self._cover_image_path}")
+        else:
+            self.cover_image_label.setText("✗ 表紙なし")
 
     def _selected_image_processing(self):
         """UIで選択された画像処理モードを返す。"""
@@ -668,22 +670,45 @@ class PDFSnipper(QMainWindow):
 
     def _local_ocr_command_candidates(self):
         """macOS/Linux/Windowsで使うアプリ横のOCRコマンド候補を返す。"""
-        app_dir = self._application_dir()
-        return [
-            os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite"),
-            os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite.exe"),
-            os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite"),
-            os.path.join(app_dir, "ocr-runtime", "bin", "ndlocr-lite"),
-            os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite.exe"),
-            os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite"),
-        ]
+        candidates = []
+        for app_dir in self._application_dirs():
+            candidates.extend(
+                [
+                    os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite"),
+                    os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite.exe"),
+                    os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite"),
+                    os.path.join(app_dir, "ocr-runtime", "bin", "ndlocr-lite"),
+                    os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite.exe"),
+                    os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite"),
+                ]
+            )
+        return candidates
 
     @staticmethod
     def _application_dir():
-        """PyInstaller実行時は実行ファイルの隣、開発時はソースの場所を返す。"""
-        if getattr(sys, "frozen", False):
-            return os.path.dirname(sys.executable)
-        return os.path.dirname(os.path.abspath(__file__))
+        """代表のアプリ配置ディレクトリを返す。"""
+        return PDFSnipper._application_dirs()[0]
+
+    @staticmethod
+    def _application_dirs():
+        """OCR環境を探す配置ディレクトリ候補を返す。"""
+        if not getattr(sys, "frozen", False):
+            return [os.path.dirname(os.path.abspath(__file__))]
+
+        executable_dir = os.path.dirname(sys.executable)
+        dirs = [executable_dir]
+
+        if sys.platform == "darwin":
+            contents_dir = os.path.dirname(executable_dir)
+            bundle_dir = os.path.dirname(contents_dir)
+            bundle_parent_dir = os.path.dirname(bundle_dir)
+            dirs.extend([bundle_dir, bundle_parent_dir])
+
+        unique_dirs = []
+        for directory in dirs:
+            if directory and directory not in unique_dirs:
+                unique_dirs.append(directory)
+        return unique_dirs
 
     @staticmethod
     def _is_available_command(command):
@@ -796,10 +821,12 @@ class PDFSnipper(QMainWindow):
             QPushButton {{
                 background-color: {background_color};
                 color: white;
+                font-weight: bold;
             }}
             QPushButton:disabled {{
                 background-color: {disabled_color};
                 color: #f2f2f2;
+                font-weight: bold;
             }}
             """)
 
