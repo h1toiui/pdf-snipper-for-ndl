@@ -2,11 +2,10 @@ import os
 import shutil
 
 import fitz
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -34,10 +33,60 @@ from models import (
     IMAGE_PROCESS_NONE,
     OUTPUT_EPUB,
     OUTPUT_PDF,
+    ProcessingCancelled,
     ProcessingOptions,
 )
 from pdf_processor import normalize_output_path, process_documents
 from widgets import SELECTION_SINGLE_PAGE, SELECTION_TWO_PAGE, SelectionLabel
+
+STATUS_IDLE = "待機中"
+STATUS_STARTING = "処理を開始しています"
+STATUS_ERROR = "エラー"
+STATUS_COMPLETE = "完了: {file_size_mb:.2f} MB"
+STATUS_PROGRESS_MESSAGES = {
+    "prepare": "処理準備中: 0 / {total} ページ",
+    "render": "ページ画像を生成中: {current} / {total} ページ",
+    "ocr": "OCR処理中: NDLOCR-Liteの完了を待っています",
+    "ocr_done": "OCR完了: {current} / {total} ページ",
+    "embed": "OCRテキストを埋め込み中",
+    "save": "ファイル保存中",
+    "default": "処理中: {current} / {total}",
+}
+
+
+class ProcessingWorker(QObject):
+    progress = Signal(str, int, int)
+    finished = Signal(object)
+    failed = Signal(str)
+    cancelled = Signal()
+
+    def __init__(self, options):
+        super().__init__()
+        self._options = options
+        self._cancel_requested = False
+
+    @Slot()
+    def run(self):
+        """PDF/EPUB生成をワーカースレッド上で実行する。"""
+        try:
+            result = process_documents(
+                self._options,
+                self.progress.emit,
+                self.is_cancel_requested,
+            )
+        except ProcessingCancelled:
+            self.cancelled.emit()
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.finished.emit(result)
+
+    def cancel(self):
+        """UIスレッドから呼ばれる中止要求。"""
+        self._cancel_requested = True
+
+    def is_cancel_requested(self):
+        return self._cancel_requested
 
 
 class PDFSnipper(QMainWindow):
@@ -51,6 +100,9 @@ class PDFSnipper(QMainWindow):
         self._preview_global_page_index = 0
         self._preview_total_page_count = 0
         self._cover_image_path = ""
+        self._processing_thread = None
+        self._processing_worker = None
+        self._cancel_requested = False
         self._build_ui()
 
     def _build_ui(self):
@@ -243,21 +295,12 @@ class PDFSnipper(QMainWindow):
         """実行ボタン、進捗バー、状態メッセージのUIグループを作る。"""
         self.btn_run = QPushButton("実行")
         self.btn_run.setFixedHeight(50)
-        self.btn_run.setStyleSheet("""
-            QPushButton {
-                background-color: #007AFF;
-                color: white;
-            }
-            QPushButton:disabled {
-                background-color: #b8b8b8;
-                color: #f2f2f2;
-            }
-            """)
-        self.btn_run.clicked.connect(self.process_pdf)
+        self.btn_run.clicked.connect(self._on_run_button_clicked)
+        self._set_run_button_style(is_processing=False)
 
         self.progress = QProgressBar()
         self._reset_progress()
-        self.status_log = QLabel("待機中")
+        self.status_log = QLabel(STATUS_IDLE)
 
         layout = QVBoxLayout()
         layout.addWidget(self.btn_run)
@@ -421,6 +464,8 @@ class PDFSnipper(QMainWindow):
 
     def process_pdf(self):
         """入力検証後に保存先を選び、PDF/EPUB生成処理を実行する。"""
+        if self._processing_thread is not None:
+            return
         if not self._validate_inputs():
             return
 
@@ -442,19 +487,80 @@ class PDFSnipper(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
 
+        self._cancel_requested = False
         self._set_processing_state(True)
-        try:
-            result = process_documents(options, self._update_file_progress)
-            self._set_progress_value(result.page_count, result.page_count)
-            message = f"保存完了:\n{result.output_path}"
-            self.status_log.setText(f"完了: {result.file_size_mb:.2f} MB")
-            QMessageBox.information(self, "完了", message)
-        except Exception as e:
-            self._reset_progress()
-            self.status_log.setText("エラー")
-            QMessageBox.critical(self, "エラー", f"処理中にエラーが発生しました:\n{e}")
-        finally:
-            self._set_processing_state(False)
+        self._start_processing_worker(options)
+
+    def _on_run_button_clicked(self):
+        """状態に応じて処理開始または中止要求を行う。"""
+        if self._processing_thread is None:
+            self.process_pdf()
+        else:
+            self.cancel_processing()
+
+    def cancel_processing(self):
+        """実行中の変換処理へ中止を要求する。"""
+        if self._processing_worker is None:
+            return
+        self._cancel_requested = True
+        self._processing_worker.cancel()
+        self.btn_run.setEnabled(False)
+
+    def _start_processing_worker(self, options):
+        """変換処理をUIスレッドから切り離して開始する。"""
+        self._processing_thread = QThread(self)
+        self._processing_worker = ProcessingWorker(options)
+        self._processing_worker.moveToThread(self._processing_thread)
+
+        self._processing_thread.started.connect(self._processing_worker.run)
+        self._processing_worker.progress.connect(self._update_file_progress)
+        self._processing_worker.finished.connect(self._on_processing_finished)
+        self._processing_worker.failed.connect(self._on_processing_failed)
+        self._processing_worker.cancelled.connect(self._on_processing_cancelled)
+
+        for signal in (
+            self._processing_worker.finished,
+            self._processing_worker.failed,
+            self._processing_worker.cancelled,
+        ):
+            signal.connect(self._processing_thread.quit)
+            signal.connect(self._processing_worker.deleteLater)
+
+        self._processing_thread.finished.connect(self._processing_thread.deleteLater)
+        self._processing_thread.finished.connect(self._clear_processing_worker)
+        self._processing_thread.start()
+
+    @Slot(object)
+    def _on_processing_finished(self, result):
+        """処理完了時のUI更新を行う。"""
+        self._set_progress_value(result.page_count, result.page_count)
+        message = f"保存完了:\n{result.output_path}"
+        self._set_status(STATUS_COMPLETE, file_size_mb=result.file_size_mb)
+        QMessageBox.information(self, "完了", message)
+        self._set_processing_state(False)
+
+    @Slot(str)
+    def _on_processing_failed(self, message):
+        """処理失敗時のUI更新を行う。"""
+        self._reset_progress()
+        self._set_status(STATUS_ERROR)
+        QMessageBox.critical(
+            self, "エラー", f"処理中にエラーが発生しました:\n{message}"
+        )
+        self._set_processing_state(False)
+
+    @Slot()
+    def _on_processing_cancelled(self):
+        """中止完了時のUI更新を行う。ダイアログは表示しない。"""
+        self._reset_progress()
+        self._set_status(STATUS_IDLE)
+        self._set_processing_state(False)
+
+    @Slot()
+    def _clear_processing_worker(self):
+        """完了後にワーカー参照を破棄する。"""
+        self._processing_thread = None
+        self._processing_worker = None
 
     def _validate_inputs(self):
         """実行に必要な入力、切り抜き範囲、プレビューの有無を確認する。"""
@@ -592,37 +698,56 @@ class PDFSnipper(QMainWindow):
 
     def _update_file_progress(self, stage, current, total):
         """処理本体から通知された段階に応じて進捗表示を更新する。"""
+        if self._cancel_requested:
+            return
+        status_template = STATUS_PROGRESS_MESSAGES.get(
+            stage, STATUS_PROGRESS_MESSAGES["default"]
+        )
         if stage == "prepare":
             self._set_progress_value(0, total)
-            self.status_log.setText(f"処理準備中: 0 / {total} ページ")
         elif stage == "render":
             self._set_progress_value(current, total)
-            self.status_log.setText(f"ページ画像を生成中: {current} / {total} ページ")
         elif stage == "ocr":
             self._set_busy_progress()
-            self.status_log.setText("OCR処理中: NDLOCR-Liteの完了を待っています")
         elif stage == "ocr_done":
             self._set_progress_value(current, total)
-            self.status_log.setText(f"OCR完了: {current} / {total} ページ")
         elif stage == "embed":
             self._set_progress_value(current, total)
-            self.status_log.setText("OCRテキストを埋め込み中")
         elif stage == "save":
             self._set_progress_value(current, total)
-            self.status_log.setText("ファイル保存中")
         else:
             self._set_progress_value(current, total)
-            self.status_log.setText(f"処理中: {current} / {total}")
+        self._set_status(status_template, current=current, total=total)
         self.progress.repaint()
         self.status_log.repaint()
-        QApplication.processEvents()
 
     def _set_processing_state(self, is_processing):
         """実行中かどうかに応じてボタンと初期メッセージを切り替える。"""
-        self.btn_run.setEnabled(not is_processing)
+        self.btn_run.setEnabled(True)
+        self.btn_run.setText("実行中止" if is_processing else "実行")
+        self._set_run_button_style(is_processing)
         if is_processing:
             self._set_busy_progress()
-            self.status_log.setText("処理を開始しています")
+            self._set_status(STATUS_STARTING)
+
+    def _set_status(self, template, **values):
+        """ステータス表示を一元的に更新する。"""
+        self.status_log.setText(template.format(**values))
+
+    def _set_run_button_style(self, is_processing):
+        """実行ボタンの通常時/処理中の見た目を切り替える。"""
+        background_color = "#a9a9a9" if is_processing else "#007AFF"
+        disabled_color = "#a9a9a9" if is_processing else "#b8b8b8"
+        self.btn_run.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {background_color};
+                color: white;
+            }}
+            QPushButton:disabled {{
+                background-color: {disabled_color};
+                color: #f2f2f2;
+            }}
+            """)
 
     def _reset_progress(self):
         """プログレスバーを待機時の空表示へ戻す。"""

@@ -12,6 +12,10 @@ IMAGE_PROCESS_NONE = "none"
 IMAGE_PROCESS_ENHANCE = "enhance"
 
 
+class ProcessingCancelled(Exception):
+    """ユーザー操作によって処理が中止されたことを表す。"""
+
+
 @dataclass(frozen=True)
 class ProcessingOptions:
     file_paths: list[str]
