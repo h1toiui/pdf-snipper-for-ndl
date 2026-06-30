@@ -668,22 +668,45 @@ class PDFSnipper(QMainWindow):
 
     def _local_ocr_command_candidates(self):
         """macOS/Linux/Windowsで使うアプリ横のOCRコマンド候補を返す。"""
-        app_dir = self._application_dir()
-        return [
-            os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite"),
-            os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite.exe"),
-            os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite"),
-            os.path.join(app_dir, "ocr-runtime", "bin", "ndlocr-lite"),
-            os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite.exe"),
-            os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite"),
-        ]
+        candidates = []
+        for app_dir in self._application_dirs():
+            candidates.extend(
+                [
+                    os.path.join(app_dir, ".venv-ndlocr", "bin", "ndlocr-lite"),
+                    os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite.exe"),
+                    os.path.join(app_dir, ".venv-ndlocr", "Scripts", "ndlocr-lite"),
+                    os.path.join(app_dir, "ocr-runtime", "bin", "ndlocr-lite"),
+                    os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite.exe"),
+                    os.path.join(app_dir, "ocr-runtime", "Scripts", "ndlocr-lite"),
+                ]
+            )
+        return candidates
 
     @staticmethod
     def _application_dir():
-        """PyInstaller実行時は実行ファイルの隣、開発時はソースの場所を返す。"""
-        if getattr(sys, "frozen", False):
-            return os.path.dirname(sys.executable)
-        return os.path.dirname(os.path.abspath(__file__))
+        """代表のアプリ配置ディレクトリを返す。"""
+        return PDFSnipper._application_dirs()[0]
+
+    @staticmethod
+    def _application_dirs():
+        """OCR環境を探す配置ディレクトリ候補を返す。"""
+        if not getattr(sys, "frozen", False):
+            return [os.path.dirname(os.path.abspath(__file__))]
+
+        executable_dir = os.path.dirname(sys.executable)
+        dirs = [executable_dir]
+
+        if sys.platform == "darwin":
+            contents_dir = os.path.dirname(executable_dir)
+            bundle_dir = os.path.dirname(contents_dir)
+            bundle_parent_dir = os.path.dirname(bundle_dir)
+            dirs.extend([bundle_dir, bundle_parent_dir])
+
+        unique_dirs = []
+        for directory in dirs:
+            if directory and directory not in unique_dirs:
+                unique_dirs.append(directory)
+        return unique_dirs
 
     @staticmethod
     def _is_available_command(command):

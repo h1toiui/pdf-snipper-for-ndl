@@ -1,4 +1,5 @@
 import json
+import locale
 import os
 import shlex
 import subprocess
@@ -42,14 +43,13 @@ def run_ndlocr_lite(
     args = _build_command(command, image_dir, output_dir)
     try:
         with (
-            tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout_file,
-            tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file,
+            tempfile.TemporaryFile() as stdout_file,
+            tempfile.TemporaryFile() as stderr_file,
         ):
             process = subprocess.Popen(
                 args,
                 stdout=stdout_file,
                 stderr=stderr_file,
-                text=True,
             )
             while process.poll() is None:
                 if is_cancel_requested is not None and is_cancel_requested():
@@ -64,8 +64,8 @@ def run_ndlocr_lite(
 
             stdout_file.seek(0)
             stderr_file.seek(0)
-            stdout = stdout_file.read()
-            stderr = stderr_file.read()
+            stdout = _decode_process_output(stdout_file.read())
+            stderr = _decode_process_output(stderr_file.read())
 
         if process.returncode != 0:
             raise subprocess.CalledProcessError(
@@ -86,12 +86,26 @@ def run_ndlocr_lite(
     return _collect_ocr_pages(output_dir)
 
 
+def _decode_process_output(output):
+    """NDLOCR-Liteの出力を環境依存の文字コードでも読めるようにする。"""
+    if isinstance(output, str):
+        return output
+
+    encodings = ["utf-8", locale.getpreferredencoding(False), "cp932"]
+    for encoding in dict.fromkeys(encodings):
+        if not encoding:
+            continue
+        try:
+            return output.decode(encoding)
+        except UnicodeDecodeError:
+            pass
+    return output.decode("utf-8", errors="replace")
+
+
 def _build_command(command, image_dir, output_dir):
     """NDLOCR-Liteを呼び出すためのコマンド引数を組み立てる。"""
-    args = shlex.split(
-        os.environ.get("NDLOCR_LITE_COMMAND", command),
-        posix=os.name != "nt",
-    )
+    command_text = os.environ.get("NDLOCR_LITE_COMMAND") or command
+    args = shlex.split(command_text, posix=os.name != "nt")
     if not args:
         raise RuntimeError("NDLOCR-Lite command is empty.")
 
@@ -155,11 +169,15 @@ def _page_from_json(path):
 
 def _page_from_ndlocr_json(data):
     """NDLOCR-Liteのcontents構造から行情報と段落テキストを作る。"""
-    contents = data.get("contents") if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return OCRPage(lines=[], image_width=0, image_height=0, text="")
+
+    contents = data.get("contents")
     if not isinstance(contents, list):
         return OCRPage(lines=[], image_width=0, image_height=0, text="")
 
-    imginfo = data.get("imginfo") if isinstance(data.get("imginfo"), dict) else {}
+    raw_imginfo = data.get("imginfo")
+    imginfo = raw_imginfo if isinstance(raw_imginfo, dict) else {}
     image_width = float(imginfo.get("img_width") or 0)
     image_height = float(imginfo.get("img_height") or 0)
 
